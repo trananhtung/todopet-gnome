@@ -22,13 +22,11 @@ build:
 test: build
 	TZ=Asia/Ho_Chi_Minh gjs -m tests/run.js
 
-# tools/ may hold only shell scripts, which ESLint skips; don't fail on an unmatched pattern.
 lint:
-	@npx eslint --no-error-on-unmatched-pattern extension tests tools
+	@npx eslint extension tests tools
 
-# Renders the art to out/*.png (tools/snapshot.js arrives with the snapshot task).
+# Renders the art sheets to out/*.png.
 snapshot:
-	@test -f tools/snapshot.js || { echo "tools/snapshot.js does not exist yet" >&2; exit 1; }
 	gjs -m tools/snapshot.js out
 
 # Runs the isolated nested GNOME Shell and plays the dev scenes (all of them, or ARGS="prefs:General ...").
