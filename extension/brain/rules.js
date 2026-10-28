@@ -1,6 +1,7 @@
 // When the pet talks (port of Brain.swift's tick body, updateFlow, trackDistraction, runRules and their helpers):
 // the reminder rules in Swift's order and timings, the deep-work protection that holds them, the distraction log and
-// the mischief that escalates while you slack (grumble → sign parade → block).
+// the mischief that escalates while you slack (grumble → sign parade → block). devAntic(kind) plays a stunt on demand
+// (dev scenes, the Developer page) through the same code.
 //
 // These are Brain methods: brain.js installs them on Brain.prototype with installRules(Brain), so `this` is the
 // Brain and the helpers they use (say, _once, _every, _context, _currentMeeting, _isAway, _distraction, ...) are its
@@ -182,18 +183,9 @@ class RuleMethods {
         const d = this._distraction(now);
         if (this.prefs.antics && ctx.inWork && this.mood === Mood.angry && now > this.anticSnoozedUntil && open > 0 && d &&
             d.minutes >= 5 && this._every('antic', 20, now)) {
-            const next = this.day.next;
             const mins = Math.trunc(d.minutes);
-            this._startAntic('block', d.app, now);
-            this._remind('antic', {
-                text: Lines.block(d.app, next), actions: [this._focusAction(next), this._spareAction()], seconds: 25, urgent: true,
-            }, {
-                chime: 'grumble',
-                why: L(`đang cáu và ở ${d.app} ${mins} phút → nhảy lên chắn màn hình`,
-                    `grumpy and on ${d.app} for ${mins} min → jumped in the way`),
-                antic: true,
-            });
-            this._speak(Lines.voiceBlock(d.app));
+            this._block(d.app, this.day.next, L(`đang cáu và ở ${d.app} ${mins} phút → nhảy lên chắn màn hình`,
+                `grumpy and on ${d.app} for ${mins} min → jumped in the way`), now);
             return;
         }
         if (ctx.inWork && open > 0 && d && d.minutes >= 2 && this._every('distract', 10, now)) {
@@ -356,30 +348,14 @@ class RuleMethods {
             const angry = this.angrySince;
             if (angry && now - angry >= 10 * MINUTE && this._every('antic', 20, now)) {
                 const mins = Math.trunc((now - angry) / MINUTE);
-                this._startAntic('parade', next.title, now);
-                this._remind('antic', {
-                    text: Lines.parade(next), actions: [this._focusAction(next), this._spareAction()], seconds: 25, urgent: true,
-                }, {
-                    chime: 'grumble',
-                    why: L(`đã cáu ${mins} phút, không gõ phím → diễu hành với biển`, `grumpy for ${mins} min, not typing → sign parade`) +
-                        this._reasonSuffix(),
-                    antic: true,
-                });
-                this._speak(Lines.voiceAngry(next));
+                this._parade(next, L(`đã cáu ${mins} phút, không gõ phím → diễu hành với biển`,
+                    `grumpy for ${mins} min, not typing → sign parade`) + this._reasonSuffix(), now);
                 return;
             }
             const annoyed = this.annoyedSince;
             if (annoyed && now - annoyed >= 10 * MINUTE && this._every('grumble', 30, now)) {
                 const mins = Math.trunc((now - annoyed) / MINUTE);
-                this._startAntic('grumble', next.title, now);
-                this._remind('antic', {
-                    text: Lines.grumble(next), actions: [this._focusAction(next), this._spareAction()], seconds: 15,
-                }, {
-                    chime: 'grumble',
-                    why: L(`đã nhăn nhó ${mins} phút`, `annoyed for ${mins} min`) + this._reasonSuffix(),
-                    antic: true,
-                });
-                this._speak(Lines.voiceGrumble());
+                this._grumble(next, L(`đã nhăn nhó ${mins} phút`, `annoyed for ${mins} min`) + this._reasonSuffix(), now);
                 return;
             }
         }
@@ -524,6 +500,59 @@ class RuleMethods {
                 this.endAntic();
             },
         };
+    }
+
+    // --- The stunts (the three antic branches of Swift's runRules) ---
+    // Each one starts the antic for the pet window, says its bubble (with "Spare me 15'") with the grumble chime,
+    // writes the diary line with `why`, and says its voice line when the voice is on.
+
+    // Sighs and stomps about `next`, the task nobody touched.
+    _grumble(next, why, now) {
+        this._startAntic('grumble', next.title, now);
+        this._remind('antic', {
+            text: Lines.grumble(next), actions: [this._focusAction(next), this._spareAction()], seconds: 15,
+        }, {chime: 'grumble', why, antic: true});
+        this._speak(Lines.voiceGrumble());
+    }
+
+    // Marches across the screen with `next` on a sign.
+    _parade(next, why, now) {
+        this._startAntic('parade', next.title, now);
+        this._remind('antic', {
+            text: Lines.parade(next), actions: [this._focusAction(next), this._spareAction()], seconds: 25, urgent: true,
+        }, {chime: 'grumble', why, antic: true});
+        this._speak(Lines.voiceAngry(next));
+    }
+
+    // Jumps into the middle of the screen and flips the table at `app` (the distracting app or site); `next` (or
+    // null) is what to do instead.
+    _block(app, next, why, now) {
+        this._startAntic('block', app, now);
+        this._remind('antic', {
+            text: Lines.block(app, next), actions: [this._focusAction(next), this._spareAction()], seconds: 25, urgent: true,
+        }, {chime: 'grumble', why, antic: true});
+        this._speak(Lines.voiceBlock(app));
+    }
+
+    // Plays a stunt now, whatever the rules say: the dev scenes and the Developer page (Swift's TODOPET_ANTIC hook).
+    // `kind` is 'grumble', 'parade' or 'block'. The grumble and the parade are about the next task; with none, the
+    // antic alone plays, about "Demo", as in Swift's hook. The block is about the distracting app or site in front,
+    // else youtube.com. The diary says it was a test; the rules' own timing is left alone.
+    devAntic(kind, now = this._now()) {
+        const why = L('thử từ chế độ nhà phát triển', 'a developer test');
+        const next = this.day.next;
+        if (kind === 'block') {
+            this._block(this._currentDistraction(now)?.app ?? 'youtube.com', next, why, now);
+        } else if (kind === 'grumble' || kind === 'parade') {
+            if (!next)
+                this._startAntic(kind, 'Demo', now);
+            else if (kind === 'grumble')
+                this._grumble(next, why, now);
+            else
+                this._parade(next, why, now);
+        } else {
+            throw new Error(`devAntic: unknown antic '${kind}'`);
+        }
     }
 
     // Starts a stunt for the pet window: `text` is what it is about (the task on the parade's sign, the task the pet

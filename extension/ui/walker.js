@@ -7,8 +7,10 @@
 // points. Times are in seconds on a steady clock.
 //
 // `behavior` is one of {kind: 'idle', until}, {kind: 'walk', toX}, {kind: 'fall'}, {kind: 'held'},
-// {kind: 'parade', toX}, {kind: 'leap', from: {x, y}, to: {x, y}, start}, {kind: 'perch', until}.
+// {kind: 'parade', toX}, {kind: 'leap', from: {x, y}, to: {x, y}, start}, {kind: 'perch', until},
+// {kind: 'grumble', start} (sighs and stomps in place; Swift's grumble has no motion, see ui/anticsLogic.js).
 import {PetMotion} from '../art/motion.js';
+import {grumbleAt} from './anticsLogic.js';
 import {PET_BASE_SIZE, clampToWorkArea, groundY} from './geometry.js';
 
 // Swift puts the window 5% of its size below the visible frame, so the feet (not the transparent margin under
@@ -44,8 +46,10 @@ function idleTime(mood, random) {
 }
 
 // Behaviors that move the pet every frame (the pet repaints at full rate then).
-const MOVING = new Set(['walk', 'fall', 'held', 'parade', 'leap']);
-const ANTICS = new Set(['parade', 'leap', 'perch']);
+const MOVING = new Set(['walk', 'fall', 'held', 'parade', 'leap', 'grumble']);
+const ANTICS = new Set(['parade', 'leap', 'perch', 'grumble']);
+// Behaviors that keep the pet standing on the ground.
+const GROUNDED = new Set(['idle', 'walk', 'parade', 'grumble']);
 
 export class PetWalker {
     constructor({size = PET_BASE_SIZE, unit = 1, random = Math.random} = {}) {
@@ -91,15 +95,18 @@ export class PetWalker {
             workArea.y + workArea.height - 300 * u - this.size);
     }
 
-    // Puts the pet at (x, y), falling from there.
+    // Puts the pet at (x, y), falling from there. A stunt it was on is over (onAnticEnded).
     place(x, y) {
+        const stunt = this.isInAntic;
         this.x = x;
         this.y = y;
         this.vy = 0;
         this.behavior = {kind: 'fall'};
+        if (stunt)
+            this.onAnticEnded?.();
     }
 
-    // Brings the pet back: it drops into the middle of the work area, 200 points up.
+    // Brings the pet back: it drops into the middle of the work area, 200 points up (a stunt is over).
     comeHere(workArea) {
         this.motion.held = false;
         this.place(workArea.x + workArea.width / 2 - this.size / 2,
@@ -113,11 +120,15 @@ export class PetWalker {
         this._lastCalmCheck = -Infinity;
     }
 
-    // Picked up by the pointer: legs still, the pet follows dragTo().
+    // Picked up by the pointer: legs still, the pet follows dragTo(). Like a click, this calls a stunt off
+    // (onAnticEnded); Swift dropped it without a word, leaving the parade's sign up.
     grab() {
+        const stunt = this.isInAntic;
         this.behavior = {kind: 'held'};
         this.motion.held = true;
         this.motion.walking = false;
+        if (stunt)
+            this.onAnticEnded?.();
     }
 
     dragTo(x, y) {
@@ -132,26 +143,44 @@ export class PetWalker {
         this.behavior = {kind: 'fall'};
     }
 
-    // Marches to the far side of the work area.
+    // Marches to the far side of the work area. Not out of your hand: returns whether it started.
     startParade(workArea) {
+        if (this.behavior.kind === 'held')
+            return false;
         const u = this.unit;
         const toX = this.x + this.size / 2 > workArea.x + workArea.width / 2
             ? workArea.x + 10 * u
             : workArea.x + workArea.width - this.size - 10 * u;
         this.behavior = {kind: 'parade', toX};
+        return true;
     }
 
-    // Leaps up into the middle of the work area (and perches there for a while).
+    // Leaps up into the middle of the work area (and perches there for a while). Not out of your hand: returns
+    // whether it started.
     startBlock(workArea, now) {
+        if (this.behavior.kind === 'held')
+            return false;
         this.behavior = {
             kind: 'leap',
             from: {x: this.x, y: this.y},
             to: {x: workArea.x + workArea.width / 2 - this.size / 2, y: workArea.y + workArea.height / 2 - this.size / 2},
             start: now,
         };
+        return true;
     }
 
-    // Stops a parade, leap or perch: the pet falls back down. Returns whether there was one.
+    // Sighs and stomps in place for a few seconds (GRUMBLE in ui/anticsLogic.js). Only a pet standing or walking on
+    // the ground does it, and not during another stunt. Returns whether it started.
+    startGrumble(now) {
+        const kind = this.behavior.kind;
+        if (kind !== 'idle' && kind !== 'walk')
+            return false;
+        this.behavior = {kind: 'grumble', start: now};
+        this.motion.walking = false;
+        return true;
+    }
+
+    // Stops a parade, leap, perch or grumble: the pet falls back down. Returns whether there was one.
     endAntic() {
         if (!this.isInAntic)
             return false;
@@ -174,7 +203,7 @@ export class PetWalker {
         } else if (kind === 'parade') {
             this.behavior = {kind: 'parade', toX: clampToWorkArea(this.behavior.toX, this.size, workArea)};
         }
-        if (kind === 'idle' || kind === 'parade')
+        if (kind === 'idle' || kind === 'parade' || kind === 'grumble')
             this.y = this.ground(workArea);
     }
 
@@ -190,6 +219,7 @@ export class PetWalker {
         const motion = this.motion;
         const u = this.unit;
         const b = this.behavior;
+        let hop = 0;
 
         switch (b.kind) {
         case 'held':
@@ -255,11 +285,21 @@ export class PetWalker {
             if (now >= b.until)
                 this.endAntic();
             break;
+        case 'grumble': {
+            const g = grumbleAt(now - b.start);
+            motion.walking = g.walking;
+            if (g.walking)
+                motion.walkPhase = g.walkPhase;
+            hop = g.hop;
+            if (g.done)
+                this.endAntic();
+            break;
+        }
         }
 
         const kind = this.behavior.kind;
-        if (kind !== 'held' && kind !== 'fall' && kind !== 'leap' && kind !== 'perch')
-            this.y = this.ground(workArea);
+        if (GROUNDED.has(kind))
+            this.y = this.ground(workArea) - hop * u;
         if (kind !== 'held')
             this.x = clampToWorkArea(this.x, this.size, workArea);
         if (!motion.walking) {

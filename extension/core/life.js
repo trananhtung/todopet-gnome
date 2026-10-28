@@ -238,8 +238,8 @@ export function distractionTotal(state) {
 // --- Rules for feeding, hunger, growth and day settlement ---
 
 const COMBO_WINDOW_MS = 30 * 60 * 1000;
-const FOODS = Object.freeze(['🍙', '🍡', '🐟', '🧁', '🍓', '🍪', '🥟', '🍩']);
-const GOLDEN_FOOD = '🍰';
+export const FOODS = Object.freeze(['🍙', '🍡', '🐟', '🧁', '🍓', '🍪', '🥟', '🍩']);
+export const GOLDEN_FOOD = '🍰';
 const HUNGER_PER_HOUR = 7;
 const DANCES = CELEBRATION_KINDS.slice(0, 4);
 

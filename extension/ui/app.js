@@ -1,8 +1,9 @@
 // Composition root: owns every service and UI object, and undoes all of it in stop().
 // extension.js creates one App per enable() and calls stop() from disable().
 //
-// start() runs the Shell services, the files, the brain (ticked every second), the pet, its speech bubble and the task
-// board (a click on the pet opens it). The pet is shown unless the screen is locked or `hidden-until` is still ahead.
+// start() runs the Shell services, the files, the brain (ticked every second), the pet, its speech bubble, the task
+// board (a click on the pet opens it) and the pet's mischief and celebrations (ui/antics.js). The pet is shown unless
+// the screen is locked or `hidden-until` is still ahead.
 // The UI language follows the `lang` setting.
 //
 // Environment variables set only by tools/nested.sh (the isolated nested shell):
@@ -28,6 +29,7 @@ import {playChime} from '../services/sound.js';
 import {speak} from '../services/speech.js';
 import {DiaryFiles, JsonStore, dataDir} from '../services/store.js';
 import {TodoistClient} from '../services/todoist.js';
+import {Antics} from './antics.js';
 import {Board} from './board.js';
 import {BubbleView} from './bubble.js';
 import {shouldShowBubble} from './bubbleLogic.js';
@@ -76,8 +78,8 @@ export class App {
         this.pet = null;
         this.bubble = null; // BubbleView
         this.board = null; // Board: the pet stands still while it is open
+        this.antics = null; // Antics: the stunts and celebrations around the pet
         // Filled in by later tasks.
-        this.antics = null;
         this.indicator = null;
 
         this._prefIds = [];
@@ -133,6 +135,7 @@ export class App {
         this.pet = new PetActor(this);
         this.bubble = new BubbleView(this);
         this.board = new Board(this);
+        this.antics = new Antics(this);
         this._setBrainHooks();
         this._petIds.push(
             this.pet.on('clicked', () => this._petClicked()),
@@ -192,6 +195,8 @@ export class App {
             this.brain.openBreakdown = null;
             this.brain.openSettings = null;
         }
+        this.antics?.destroy();
+        this.antics = null;
         this.board?.destroy();
         this.board = null;
         this.bubble?.destroy();
@@ -303,10 +308,15 @@ export class App {
                 this.pet?.poke();
                 this.board?.refresh();
             }),
-            brain.on('celebrate', () => this.pet?.poke()),
+            brain.on('celebrate', celebration => {
+                this.pet?.poke();
+                this.antics?.celebrate(celebration);
+            }),
             brain.on('bubble', bubble => this._onBubble(bubble)),
-            brain.on('antic', antic => this._performAntic(antic)),
-            brain.on('antic-end', () => this.pet?.endAntic()));
+            // The brain's mischief, played by the pet and the antics (Swift: AppDelegate.perform); when it is over
+            // (a click, "Spare me 15'", a celebration, the site left) everything comes off the screen.
+            brain.on('antic', antic => this.antics?.run(antic)),
+            brain.on('antic-end', () => this.antics?.stop()));
     }
 
     // Swift: AppDelegate.showBubble. The brain holds one bubble; the view shows it above the pet and gives it back
@@ -335,16 +345,6 @@ export class App {
     updatePause() {
         if (this.pet)
             this.pet.paused = Boolean(this.bubble?.visible) || Boolean(this.board?.isOpen);
-    }
-
-    // The brain's mischief, played by the pet (Swift: AppDelegate.perform). Grumbling needs no movement.
-    _performAntic(antic) {
-        if (!this.pet?.visible)
-            return;
-        if (antic?.kind === 'parade')
-            this.pet.startParade(antic.text);
-        else if (antic?.kind === 'block')
-            this.pet.startBlock();
     }
 
     // Swift: AppDelegate.petClicked. Clicking the pet calls off any mischief, takes away a bubble without buttons and

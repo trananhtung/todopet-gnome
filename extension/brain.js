@@ -14,6 +14,8 @@
 //
 // Events (brain.on(name, cb)): 'changed' after any change the UI shows; 'bubble' with the new bubble, or null when
 // it was taken away; 'celebrate' with the celebration; 'antic' with the antic; 'antic-end'.
+// For the dev scenes and the Developer page: devAntic(kind) (brain/rules.js) and devCelebrate({kind, golden, combo})
+// play a stunt or a celebration on demand.
 // A bubble is {id, text, actions: [{title, primary, run}], seconds = 12, urgent, reminder}. The bubble view hides it
 // after `seconds` and calls dismissBubble(); if no view did, the brain drops it itself `seconds` + 2 s after showing it
 // (and emits 'bubble' with null).
@@ -27,7 +29,7 @@ import {currentEvent, freeMinutes, suggest, targetFor} from './core/calendarMath
 import {PetLog} from './core/diary.js';
 import {Emitter} from './core/emitter.js';
 import {L} from './core/l10n.js';
-import {LifeRules, PetLife, accessoryEmoji, stageName} from './core/life.js';
+import {CELEBRATION_KINDS, FOODS, GOLDEN_FOOD, LifeRules, PetLife, accessoryEmoji, stageName} from './core/life.js';
 import {Lines} from './core/lines.js';
 import {DaySnapshot} from './core/models.js';
 import {Mood, defaultMoodInputs, evaluateMood, moodLabel} from './core/mood.js';
@@ -983,9 +985,29 @@ export class Brain extends Emitter {
             if (big)
                 this._speak(Lines.voiceCheer());
         }
-        // The dance ends after about 4 seconds; the mood follows (Swift: recompute after 4.2 s).
-        this._recomputeAt = new Date(now.getTime() + 4.2 * SECOND);
+        this._recomputeAfterDance();
         this.emit('celebrate', this.celebration);
+    }
+
+    // Celebrates without a finished task: the dev scenes and the Developer page. Shows the dance `kind` (fireworks for
+    // a golden treat) with its treat falling, for `combo`, with the chime and the mood of a real celebration (4 s, 5 s
+    // when golden), and calls off any stunt. The pet is not fed, nothing goes to the diary and no bubble is said.
+    devCelebrate({kind = 'jump', golden = false, combo = 1} = {}, now = this._now()) {
+        if (!CELEBRATION_KINDS.includes(kind))
+            throw new Error(`devCelebrate: unknown celebration '${kind}'`);
+        this.endAntic();
+        this.celebration = {kind: golden ? 'fireworks' : kind, food: golden ? GOLDEN_FOOD : FOODS[0], golden, combo, start: now};
+        this.celebrateUntil = new Date(now.getTime() + (golden ? 5 : 4) * SECOND);
+        this.recompute(now);
+        this._play(golden ? 'big' : 'celebrate');
+        this._recomputeAfterDance();
+        this.emit('celebrate', this.celebration);
+    }
+
+    // The mood follows the end of the dance, 0.2 s after `celebrateUntil`. Swift recomputed 4.2 s after every
+    // celebration, so a 5 s one (golden, or growing up) went on until the next 15 s round.
+    _recomputeAfterDance() {
+        this._recomputeAt = new Date(this.celebrateUntil.getTime() + 0.2 * SECOND);
     }
 
     // --- Talking ---

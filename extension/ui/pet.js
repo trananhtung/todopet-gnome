@@ -4,12 +4,15 @@
 // it when angry. The focus chip (🍅 12:34) or the deep-work chip (🎧) sits on its head.
 //
 //   new PetActor(app)   reads app.prefs and app.brain (app.brain may be null or replaced; it is read every frame)
-//   show(), hide(), destroy(), actor, visible, frame -> {x, y, width, height} (stage pixels), paused (set while a
-//   bubble or the board is open: the pet stands still), motion (facing, walking... read-only), isInAntic,
-//   comeHere(), startParade(text), startBlock(), endAntic(), poke() (something changed: repaint now)
+//   show(), hide(), destroy(), actor, visible, frame -> {x, y, width, height} (stage pixels), unit (stage pixels
+//   per point), paused (set while a bubble or the board is open: the pet stands still), motion (facing, walking...
+//   read-only), isInAntic, comeHere(), startParade(text), startBlock(), startGrumble() (the three return whether the
+//   stunt started), endAntic(),
+//   poke() (something changed: repaint now)
 //
 // Events: 'clicked'; 'right-clicked' with {x, y} (stage coordinates of the click); 'moved' with the frame;
-// 'antic-ended' when a parade or a perch is over (the app tells the brain).
+// 'antic-ended' when a parade, a perch or a grumble is over (the app tells the brain); 'visibility-changed' with
+// true or false when show() or hide() changed whether the pet is on screen.
 //
 // Repaints come from a Clutter.Timeline at about 30 fps while the pet moves or animates, from a 250 ms timeout
 // (4 fps) while it stands still, and stop while it is hidden (ui/frameRate.js decides which).
@@ -148,6 +151,10 @@ export class PetActor extends Emitter {
         return this._walker.isInAntic;
     }
 
+    get unit() {
+        return this._walker.unit;
+    }
+
     // --- For the dev scenes ---
 
     get workArea() {
@@ -194,6 +201,7 @@ export class PetActor extends Emitter {
         this._setHovered(this.actor.hover);
         this.actor.queue_repaint();
         this._updateLoop();
+        this.emit('visibility-changed', true);
     }
 
     hide() {
@@ -204,6 +212,7 @@ export class PetActor extends Emitter {
         this._shown = false;
         this._setHovered(false);
         this._updateLoop();
+        this.emit('visibility-changed', false);
     }
 
     // Something the pet shows changed (mood, celebration, focus): repaint now instead of on the next slow frame.
@@ -226,19 +235,31 @@ export class PetActor extends Emitter {
         this._updateLoop();
     }
 
-    // Marches to the far side of the screen. The sign with `text` on it is drawn by the antics.
+    // Marches to the far side of the screen. The sign with `text` on it is drawn by ui/antics.js. Returns whether it
+    // started (not while the pet is in your hand).
     startParade(_text) {
-        this._walker.startParade(this._workArea);
+        const started = this._walker.startParade(this._workArea);
         this._updateLoop();
+        return started;
     }
 
-    // Leaps up into the middle of the screen and stays there a while.
+    // Leaps up into the middle of the screen and stays there a while. Returns whether it started (not while the pet
+    // is in your hand).
     startBlock() {
-        this._walker.startBlock(this._workArea, monotonicSeconds());
+        const started = this._walker.startBlock(this._workArea, monotonicSeconds());
         this._updateLoop();
+        return started;
     }
 
-    // Cuts a parade or a perch short: the pet falls back down (and 'antic-ended' is emitted).
+    // Sighs and stomps in place for a few seconds (ui/antics.js draws the breath and the dust). Only a pet standing or
+    // walking on the ground does it. Returns whether it started.
+    startGrumble() {
+        const started = this._walker.startGrumble(monotonicSeconds());
+        this._updateLoop();
+        return started;
+    }
+
+    // Cuts a parade, a perch or a grumble short: the pet falls back down (and 'antic-ended' is emitted).
     endAntic() {
         this._walker.endAntic();
         this._updateLoop();

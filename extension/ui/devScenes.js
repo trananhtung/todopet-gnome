@@ -18,6 +18,7 @@ import {Lines} from '../core/lines.js';
 import {Mood} from '../core/mood.js';
 import {ClaudeError} from '../services/claude.js';
 import {hasSpeech} from '../services/speech.js';
+import {signFrame} from './anticsLogic.js';
 import {rectsOverlap} from './bubbleLogic.js';
 import {diaryRows, folderURI, stuckLine, templateSteps} from './viewsLogic.js';
 
@@ -1291,5 +1292,214 @@ registerScene('diary', ctx => withBoard(ctx, Mood.angry, async (board, pet, poin
         });
     } finally {
         diary._files = null;
+    }
+}));
+
+// --- Mischief and celebrations (ui/antics.js) ---
+
+// The effect actors of ui/antics.js on the stage now (todopet-sign, todopet-grumble, todopet-celebration).
+const ANTIC_ACTORS = new Set(['todopet-sign', 'todopet-grumble', 'todopet-celebration']);
+const anticActors = () => Main.layoutManager.uiGroup.get_children().map(a => a.name).filter(name => ANTIC_ACTORS.has(name));
+
+// Plays the celebration `options` (brain.devCelebrate, the Developer page's path) and shoots it `at` ms in. Then the
+// effects go away by themselves and the pet drops back to the slow frames. The pet starts in the normal mood (the
+// nested shell's clock may say night, and the colors would blend in from sleeping): the pin is let go just before.
+async function celebrateScene(ctx, shot, options, at, expected) {
+    await withPet(ctx, Mood.normal, async pet => {
+        const {brain, antics} = ctx.app;
+        await untilOnGround(ctx, pet);
+        // Standing still, so the dance happens where it started.
+        pet.paused = true;
+        await ctx.wait(1000);
+        brain.pin({mood: undefined});
+        brain.devCelebrate(options);
+        await ctx.wait(at);
+        const plan = antics.celebrationPlan;
+        const c = brain.celebration;
+        console.log(`TODOPET ${shot} mood=${brain.mood} celebration=${c.kind} golden=${c.golden} combo=${c.combo} ` +
+            `food=${c.food} plan=${JSON.stringify(plan)} actors=${anticActors()} pet=${describePet(pet)}`);
+        expect(brain.mood === Mood.celebrating, `the mood is ${brain.mood}, not celebrating`);
+        expect(plan?.effect === expected.effect && plan.badge === expected.badge,
+            `the effects are ${JSON.stringify(plan)}, not ${JSON.stringify(expected)}`);
+        expect(anticActors().join() === 'todopet-celebration', `the actors on stage are ${anticActors()}`);
+        await ctx.shot(shot);
+        const during = await paintRate(ctx, pet, 500);
+        await until(ctx, () => antics.celebrationPlan === null && brain.mood !== Mood.celebrating, 7000);
+        await ctx.wait(1000);
+        const after = await paintRate(ctx, pet, 2000);
+        console.log(`TODOPET ${shot} over: mood=${brain.mood} actors=[${anticActors()}] paints/s ${during.toFixed(1)} during, ` +
+            `${after.toFixed(1)} after`);
+        expect(brain.mood !== Mood.celebrating && anticActors().length === 0, 'the celebration did not go away');
+        expect(during >= 15, `a celebrating pet is drawn at ${during.toFixed(1)} frames a second`);
+        expect(after <= 6, `after the celebration the pet still repaints ${after.toFixed(1)} times a second`);
+    });
+}
+
+// A finished task: the treat falls into the pet's mouth while it jumps in a shower of confetti (life.png, "treat falls").
+registerScene('celebrate-jump', ctx => celebrateScene(ctx, 'celebrate-jump', {kind: 'jump'}, 330,
+    {effect: 'confetti', badge: null}));
+
+// The third task in a row: the fireworks dance, fireworks around the pet and a ×3 badge (life.png, "fireworks").
+registerScene('celebrate-fireworks', ctx => celebrateScene(ctx, 'celebrate-fireworks', {kind: 'fireworks', combo: 3}, 1700,
+    {effect: 'fireworks', badge: '×3'}));
+
+// A rare golden treat: the golden pet with its sparkles and golden fireworks (life.png, "rare golden").
+registerScene('golden', ctx => celebrateScene(ctx, 'golden', {kind: 'jump', golden: true}, 1700,
+    {effect: 'fireworks', badge: null}));
+
+// Grumpy for too long: the pet marches to the far side of the screen dragging a sign with the task you avoid, the
+// bubble following it. It is said out loud once (the voice is on for the scene; the nested shell only logs it).
+// Frames: about 30 a second while it marches, back to 4 once the parade is over.
+registerScene('parade', ctx => withPet(ctx, Mood.angry, async pet => {
+    const {app} = ctx;
+    const {brain, antics, bubble: view} = app;
+    const voice = app.settings.get_boolean('voice-on');
+    app.settings.set_boolean('voice-on', true);
+    const speak = brain.env.speak;
+    const spoken = [];
+    brain.env.speak = text => {
+        spoken.push(text);
+        speak(text);
+    };
+    try {
+        // From the middle of the screen, so the march is long enough to watch and short enough to wait for.
+        pet.comeHere();
+        await untilOnGround(ctx, pet);
+        brain.devAntic('parade');
+        await ctx.wait(1500);
+        const sign = antics.sign;
+        const p = pet.frame;
+        const facing = pet.motion.facing;
+        console.log(`TODOPET parade ${describePet(pet)} facing=${facing} sign=${JSON.stringify(sign)} ` +
+            `antic=${JSON.stringify(brain.antic)} bubble=${JSON.stringify(brain.bubble?.text)} ` +
+            `buttons=${brain.bubble?.actions.map(a => a.title)} spoken=${JSON.stringify(spoken)}`);
+        expect(pet.behavior === 'parade' && pet.motion.walking && antics.playing === 'parade', `the pet is not parading: ${describePet(pet)}`);
+        expect(sign && sign.text === brain.antic?.text && sign.text === brain.day.next?.title,
+            `the sign does not carry the next task: ${JSON.stringify(sign)}`);
+        const want = signFrame(p, facing, sign);
+        expect(sign.ropeOnRight === (facing > 0) && sign.x === want.x && sign.y === want.y,
+            `the sign is not behind the pet with its rope toward it: ${JSON.stringify(sign)} vs ${JSON.stringify(want)}`);
+        expect(facing > 0 ? sign.x + sign.width <= p.x + p.width * 0.2 + 1 : sign.x >= p.x + p.width * 0.8 - 1,
+            'the sign is not on the side the pet walks away from');
+        expect(view.visible && brain.bubble?.urgent && brain.bubble.actions.some(a => a.title === L("Tha cho tôi 15'", "Spare me 15'")),
+            'the parade bubble with "Spare me 15\'" is not up');
+        expect(spoken.length === 1, `the voice said ${spoken.length} lines, not 1`);
+        const during = await paintRate(ctx, pet, 1000);
+        const moved = pet.frame.x - p.x;
+        await ctx.shot('parade');
+        const following = antics.sign;
+        expect(following.x !== sign.x && following.x === signFrame(pet.frame, pet.motion.facing, following).x,
+            'the sign does not follow the pet');
+
+        await until(ctx, () => brain.antic === null, 16000);
+        console.log(`TODOPET parade over: ${describePet(pet)} antic=${brain.antic} actors=[${anticActors()}]`);
+        expect(brain.antic === null && antics.playing === null, 'the parade did not end at the far side');
+        expect(anticActors().length === 0 && antics.sign === null, 'the sign is still up after the parade');
+        await ctx.wait(1500);
+        const after = await paintRate(ctx, pet, 3000);
+        console.log(`TODOPET parade paints/s: ${during.toFixed(1)} while marching (${moved} px in 1 s), ` +
+            `${after.toFixed(1)} after it ended`);
+        expect(during >= 20, `the parade is drawn at ${during.toFixed(1)} frames a second`);
+        expect(after <= 6, `after the parade the pet still repaints ${after.toFixed(1)} times a second`);
+    } finally {
+        brain.env.speak = speak;
+        app.settings.set_boolean('voice-on', voice);
+        brain.endAntic();
+        brain.dismissBubble();
+    }
+}));
+
+// Grumpy on a distracting site: the pet leaps into the middle of the screen and flips the table at it, in a bubble
+// with "Spare me 15'" (bubble-block.png). The site in front is faked for the scene, or the brain would end the block
+// on its next round (it ends when you leave the site). A click on the pet calls it off: it drops back down (and the
+// board opens, as in Swift).
+registerScene('block', ctx => withPet(ctx, Mood.angry, async (pet, pointer) => {
+    const {brain, antics, bubble: view, board} = ctx.app;
+    const focus = brain.env.focus;
+    const since = new Date();
+    brain.env.focus = () => ({appName: 'Firefox', wmClass: 'firefox', title: 'Cats - YouTube — Mozilla Firefox', isBrowser: true, since});
+    try {
+        await untilOnGround(ctx, pet);
+        brain.devAntic('block');
+        await ctx.wait(1500);
+        const p = pet.frame;
+        const wa = pet.workArea;
+        console.log(`TODOPET block ${describePet(pet)} work area ${JSON.stringify(wa)} antic=${JSON.stringify(brain.antic)} ` +
+            `bubble=${JSON.stringify(brain.bubble?.text)} frame=${JSON.stringify(view.frame)} buttons=${brain.bubble?.actions.map(a => a.title)}`);
+        expect(pet.behavior === 'perch' && antics.playing === 'block', `the pet did not leap up: ${describePet(pet)}`);
+        expect(Math.abs(p.x + p.width / 2 - (wa.x + wa.width / 2)) <= 1 && Math.abs(p.y + p.height / 2 - (wa.y + wa.height / 2)) <= 1,
+            'the pet is not in the middle of the screen');
+        expect(view.visible && brain.bubble?.text.startsWith('(╯°□°)╯︵ ┻━┻') && brain.bubble.text.includes('YOUTUBE.COM'),
+            'the table-flip bubble is not up');
+        expect(brain.bubble.actions.some(a => a.title === L("Tha cho tôi 15'", "Spare me 15'")), 'the bubble cannot spare you');
+        const f = view.frame;
+        expect(f.y + f.height <= p.y + p.height * 0.38 + 1 && f.x <= p.x + p.width / 2 && f.x + f.width >= p.x + p.width / 2,
+            'the bubble did not follow the pet to the middle');
+        const perched = await paintRate(ctx, pet, 1000);
+        await ctx.shot('block');
+
+        const {x, y, width, height} = pet.frame;
+        pointer.moveTo(x + width / 2, y + height * 0.65);
+        await ctx.wait(150);
+        pointer.press();
+        await ctx.wait(60);
+        pointer.release();
+        await ctx.wait(200);
+        console.log(`TODOPET block clicked: ${describePet(pet)} antic=${brain.antic} board open=${board.isOpen} perched paints/s ${perched.toFixed(1)}`);
+        expect(brain.antic === null && !pet.isInAntic && antics.playing === null, 'a click did not call the block off');
+        await untilOnGround(ctx, pet, 3000);
+        expect(perched <= 6, `the perched pet repaints ${perched.toFixed(1)} times a second`);
+    } finally {
+        brain.env.focus = focus;
+        board.close();
+        brain.endAntic();
+        brain.dismissBubble();
+    }
+}));
+
+// Annoyed for too long: the pet sighs (puffs of breath), then stomps four times on alternate feet (dust under each),
+// in place, and the grumble ends by itself.
+registerScene('grumble', ctx => withPet(ctx, Mood.annoyed, async pet => {
+    const {brain, antics} = ctx.app;
+    try {
+        await untilOnGround(ctx, pet);
+        pet.paused = true;
+        await ctx.wait(500);
+        const start = pet.frame;
+        brain.devAntic('grumble');
+        await ctx.wait(500);
+        console.log(`TODOPET grumble ${describePet(pet)} antic=${JSON.stringify(brain.antic)} actors=${anticActors()} ` +
+            `bubble=${JSON.stringify(brain.bubble?.text)}`);
+        expect(pet.behavior === 'grumble' && antics.playing === 'grumble' && brain.antic?.kind === 'grumble',
+            `the pet is not grumbling: ${describePet(pet)}`);
+        expect(anticActors().join() === 'todopet-grumble', `the actors on stage are ${anticActors()}`);
+        await ctx.shot('grumble');
+        // The stomps: the pet goes up and down in place. One shot as the first stomp lands, in its dust.
+        let highest = start.y;
+        let shot = false;
+        const xs = new Set();
+        for (let i = 0; i < 50; i++) {
+            await ctx.wait(30);
+            highest = Math.min(highest, pet.frame.y);
+            xs.add(pet.frame.x);
+            if (!shot && highest <= start.y - 4 && pet.frame.y === start.y) {
+                shot = true;
+                await ctx.shot('grumble-stomp');
+            }
+        }
+        expect(shot, 'no shot of a stomp');
+        console.log(`TODOPET grumble stomps: lifted ${start.y - highest} px, x ${[...xs]}`);
+        expect(start.y - highest >= 3 && xs.size === 1 && xs.has(start.x), 'the pet did not stomp in place');
+        await until(ctx, () => brain.antic === null, 4000);
+        await ctx.wait(1000);
+        const after = await paintRate(ctx, pet, 2000);
+        console.log(`TODOPET grumble over: ${describePet(pet)} antic=${brain.antic} actors=[${anticActors()}] paints/s ${after.toFixed(1)}`);
+        expect(brain.antic === null && antics.playing === null && pet.behavior === 'idle' && pet.frame.y === pet.ground,
+            'the grumble did not end by itself');
+        expect(anticActors().length === 0, 'the breath and dust are still on stage');
+        expect(after <= 6, `after the grumble the pet still repaints ${after.toFixed(1)} times a second`);
+    } finally {
+        brain.endAntic();
+        brain.dismissBubble();
     }
 }));

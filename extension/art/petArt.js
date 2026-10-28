@@ -1308,15 +1308,26 @@ function signText(text) {
     };
 }
 
-function signGeometry(text) {
-    const t = signText(text);
+// The last sign laid out: {text, geometry}. Laying the text out takes about 1.6 ms and the parade sizes and draws the
+// same sign again and again; one entry is enough, as one sign is on screen at a time.
+let signCache = null;
+
+// The sign for `text`, laid out: its layouts, the board's size and the whole sign's size (with the margin and the
+// rope). The same text gives back the same (shared, read-only) object until another text is laid out.
+export function signGeometry(text) {
+    const key = String(text ?? '');
+    if (signCache?.text === key)
+        return signCache.geometry;
+    const t = signText(key);
     const boardWidth = t.textWidth + 2 * SIGN_PAD_X;
     const boardHeight = t.textHeight + 2 * SIGN_PAD_Y;
-    return {
+    const geometry = Object.freeze({
         ...t, boardWidth, boardHeight,
         width: 2 * SIGN_MARGIN + boardWidth + SIGN_ROPE.width,
         height: 2 * SIGN_MARGIN + boardHeight,
-    };
+    });
+    signCache = {text: key, geometry};
+    return geometry;
 }
 
 // The size the sign wants for `text`, in pixels (the panel's fittingSize in Swift).

@@ -12,11 +12,12 @@
 set -euo pipefail
 
 # Scenes played by default, in this order. A task that adds a scene appends its id here.
-SCENES=(smoke services walk hover drag focus-chip sleeping bubble bubble-stuck long-title board board-setup board-delete add board-bubble board-hidden split wardrobe diary)
+SCENES=(smoke services walk hover drag focus-chip sleeping bubble bubble-stuck long-title board board-setup board-delete add board-bubble board-hidden split wardrobe diary celebrate-jump celebrate-fireworks golden parade block grumble)
 
 UUID=todopet@trananhtung.github.io
 MONITOR=1600x900
-TIMEOUT_SECONDS=180
+# A hang guard for the whole run: the 25 default scenes take about 140 s.
+TIMEOUT_SECONDS=300
 ERROR_GRACE_SECONDS=20
 # What counts as an error in the log: uncaught JS exceptions, anything logged with console.error or logError
 # (GNOME Shell turns those into "GNOME Shell-CRITICAL"), any other CRITICAL from GLib, St, Clutter or Cogl (a
