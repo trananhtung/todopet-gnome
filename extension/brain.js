@@ -215,9 +215,9 @@ export class Brain extends Emitter {
         this._refreshing = null;
         this._refreshingGen = -1;
         this._syncCount = 0; // syncs started so far
-        // Tasks ticked off here that Todoist's lists may not show as done yet (see _heldTicks): id -> {task (the
+        // Tasks ticked off here that Todoist's lists may not show as done yet (see _heldClosed): id -> {task (the
         // completed copy), closedAfter (_syncCount when Todoist took the close; null while it is in flight)}.
-        this._ticks = new Map();
+        this._closedHere = new Map();
         this._syncBackoffUntil = null;
         this._askedAfter401 = false;
         this._askTokenAt = null;
@@ -612,7 +612,7 @@ export class Brain extends Emitter {
     // `seq`: the number of the sync that read `active` and `completedToday` (_syncCount when it started).
     _apply(active, completedToday, now, seq) {
         const today = dayKey(now);
-        const held = this._heldTicks(active, completedToday, seq);
+        const held = this._heldClosed(active, completedToday, seq);
         const heldIds = new Set(held.map(t => t.id));
         this.active = active.filter(t => !heldIds.has(t.id));
         // Only today's completions: a sync that started before midnight must not count yesterday's for today.
@@ -638,17 +638,17 @@ export class Brain extends Emitter {
 
     // The tasks ticked off here that sync number `seq` cannot be trusted about, so they stay done: a sync that
     // started before Todoist took the close still lists the task as open (opening the board starts one, and a second
-    // tick would feed the pet twice), and the completed list can lag behind the close. A tick is let go once a sync
+    // tick would feed the pet twice), and the completed list can lag behind the close. One is let go once a sync
     // that started after the close shows the task done, or open again (reopened in the Todoist app).
-    _heldTicks(active, completedToday, seq) {
+    _heldClosed(active, completedToday, seq) {
         const held = [];
-        for (const [id, tick] of this._ticks) {
-            const after = tick.closedAfter !== null && seq > tick.closedAfter;
+        for (const [id, closing] of this._closedHere) {
+            const after = closing.closedAfter !== null && seq > closing.closedAfter;
             const listed = list => list.some(t => t.id === id);
             if (after && (listed(active) || completedToday === null || listed(completedToday)))
-                this._ticks.delete(id);
+                this._closedHere.delete(id);
             else
-                held.push(tick.task);
+                held.push(closing.task);
         }
         return held;
     }
@@ -674,7 +674,7 @@ export class Brain extends Emitter {
         this.fired = new Map();
         this.knownCompleted = new Set();
         this.completedViaPet = new Set();
-        this._ticks = new Map();
+        this._closedHere = new Map();
         this.didLoadOnce = false;
         this.completed = [];
     }
