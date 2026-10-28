@@ -30,6 +30,7 @@ import St from 'gi://St';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import {Spinner} from 'resource:///org/gnome/shell/ui/animation.js';
 
+import {shortText} from '../core/dates.js';
 import {L, getLang} from '../core/l10n.js';
 import {insideRect} from './bubbleLogic.js';
 import {
@@ -44,6 +45,9 @@ import {
 } from './widgets.js';
 
 const FADE_IN_MS = 120;
+// A task title on the frog card or in a row is cut to this many characters (an ellipsis at the end) and wraps, so a
+// very long one cannot push the board past the screen (Swift: lineLimit(2)).
+const TITLE_MAX = 120;
 
 const isDark = () => St.Settings.get().color_scheme === St.SystemColorScheme.PREFER_DARK;
 
@@ -682,7 +686,7 @@ export class Board {
         slot.add_child(label('🐸', 'todopet-frog-icon'));
         const text = box({vertical: true, styleClass: 'todopet-frog-text', x_expand: true, y_align: Clutter.ActorAlign.CENTER});
         text.add_child(label(frog.label, 'todopet-caption todopet-bold todopet-secondary'));
-        text.add_child(wrapLabel(frog.title, 'todopet-frog-title'));
+        text.add_child(wrapLabel(shortText(frog.title, TITLE_MAX), 'todopet-frog-title'));
         slot.add_child(text);
         if (frog.focus)
             slot.add_child(pillButton(frog.focus, () => this._app.brain?.startFocus(frog.task), {primary: true, styleClass: 'todopet-pill-big'}));
@@ -785,7 +789,7 @@ export class Board {
         this._tooltips.attach(check, L('Hoàn thành', 'Complete'));
         line.add_child(check);
         const text = box({vertical: true, styleClass: 'todopet-task-text', x_expand: true});
-        text.add_child(wrapLabel(r.title, 'todopet-task-title'));
+        text.add_child(wrapLabel(shortText(r.title, TITLE_MAX), 'todopet-task-title'));
         if (r.meta.length > 0) {
             const meta = box({styleClass: 'todopet-task-meta'});
             for (const item of r.meta)

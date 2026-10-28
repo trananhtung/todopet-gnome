@@ -19,6 +19,7 @@ import {LogSummary, PetLog} from '../core/diary.js';
 import {dayKey} from '../core/dates.js';
 import {L} from '../core/l10n.js';
 import {Lines} from '../core/lines.js';
+import {Task} from '../core/models.js';
 import {Mood} from '../core/mood.js';
 import {rowCount, settingsPages} from '../core/settingsSpec.js';
 import {ClaudeError} from '../services/claude.js';
@@ -900,6 +901,57 @@ registerScene('add', ctx => withBoard(ctx, null, async board => {
     await ctx.wait(300);
     console.log(`TODOPET add closed by the Escape key: ${!board.isOpen}`);
     expect(!board.isOpen, 'the Escape key did not close the board');
+}));
+
+// A 300-character title on the frog card and on a task row: each is cut to 120 characters (an ellipsis at the end)
+// and wraps, so the board stays inside the work area (Swift: lineLimit(2)). The two tasks go into the demo's list
+// and come out again afterwards.
+registerScene('board-long-title', ctx => withBoard(ctx, null, async (board, pet) => {
+    const {brain} = ctx.app;
+    const demo = brain.todo;
+    expect(brain.demo && Array.isArray(demo?._active), 'the long-title board scene needs the demo');
+    const words = 'Viết lại toàn bộ tài liệu hướng dẫn cài đặt cho khách hàng mới, kèm ảnh chụp từng bước và danh sách kiểm tra. ';
+    const long = words.repeat(4).slice(0, 300);
+    expect(long.length === 300, `the title has ${long.length} characters`);
+    const now = new Date();
+    const yesterday = dayKey(new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1, 12));
+    // P1 and overdue: the frog. P4 today: a row.
+    const frog = new Task({id: 'long-frog', content: `A ${long}`, priority: 4, due: {date: yesterday, string: 'yesterday'}});
+    const row = new Task({id: 'long-row', content: `B ${long}`, priority: 1, due: {date: dayKey(now), string: 'today'}});
+    demo._active.push(frog, row);
+    try {
+        board.open();
+        await brain.refresh();
+        await ctx.wait(800);
+        await brain.settle();
+        await ctx.wait(300);
+        const titles = [];
+        const walk = actor => {
+            if (actor instanceof St.Label &&
+                (actor.has_style_class_name('todopet-frog-title') || actor.has_style_class_name('todopet-task-title')))
+                titles.push(actor.text);
+            for (const child of actor.get_children())
+                walk(child);
+        };
+        walk(board.actor);
+        const shown = titles.filter(text => text.startsWith('A Viết') || text.startsWith('B Viết'));
+        const f = board.frame;
+        const wa = pet.workArea;
+        console.log(`TODOPET board-long-title frog=${board.model.frog?.task.id} titles ${shown.map(t => t.length).join(' ')} ` +
+            `board ${JSON.stringify(f)} work area ${JSON.stringify(wa)}`);
+        expect(board.model.frog?.task.id === 'long-frog', `the long task is not the frog (${board.model.frog?.task.id})`);
+        expect(board.listText().includes(row.title), 'the long task is not in the list');
+        expect(shown.length >= 2 && shown.every(text => text.length <= 120 && text.endsWith('…')),
+            `the long titles are not cut to 120 characters: ${shown.map(t => t.length)}`);
+        expect(f.height <= wa.height, `the board is taller than the work area: ${f.height} > ${wa.height}`);
+        expectBoardPlaced(board, pet);
+        await ctx.shot('board-long-title');
+    } finally {
+        board.close();
+        demo._active = demo._active.filter(t => t !== frog && t !== row);
+        await brain.refresh();
+        await brain.settle();
+    }
 }));
 
 // Ruling R13: an urgent bubble while the board is open goes next to the board, not over it. A press on the bubble's

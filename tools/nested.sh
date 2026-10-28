@@ -12,11 +12,11 @@
 set -euo pipefail
 
 # Scenes played by default, in this order. A task that adds a scene appends its id here.
-SCENES=(smoke services walk hover drag focus-chip sleeping bubble bubble-stuck long-title board board-setup board-delete add board-bubble board-hidden split wardrobe diary celebrate-jump celebrate-fireworks golden parade block grumble menu locked dev-trigger demo-toggle reenable prefs:General prefs:Day prefs:Day:end prefs:Todoist prefs:Distractions prefs:Calendar prefs:Postponed prefs:Diary prefs:Shortcut prefs:Developer prefs:Developer:end)
+SCENES=(smoke services walk hover drag focus-chip sleeping bubble bubble-stuck long-title board board-setup board-delete add board-long-title board-bubble board-hidden split wardrobe diary celebrate-jump celebrate-fireworks golden parade block grumble menu locked dev-trigger demo-toggle reenable prefs:General prefs:Day prefs:Day:end prefs:Todoist prefs:Distractions prefs:Calendar prefs:Postponed prefs:Diary prefs:Shortcut prefs:Developer prefs:Developer:end)
 
 UUID=todopet@trananhtung.github.io
 MONITOR=1600x900
-# A hang guard for the whole run: the 41 default scenes take about 220 s.
+# A hang guard for the whole run: the 42 default scenes take about 225 s.
 TIMEOUT_SECONDS=360
 ERROR_GRACE_SECONDS=20
 # What counts as an error in the log: uncaught JS exceptions, anything logged with console.error or logError
