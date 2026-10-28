@@ -1,13 +1,17 @@
-// Renders the pet art to PNG sheets for docs and visual checks (port of MoodSheet in DevTools.swift).
-// Usage: gjs -m tools/snapshot.js <outDir>   (make snapshot writes to out/)
+// Renders the pet art to PNG sheets for docs and visual checks (ports of MoodSheet and LifeSheet in DevTools.swift),
+// plus a sample of the parade sign. Usage: gjs -m tools/snapshot.js <outDir>   (make snapshot writes to out/)
 import Cairo from 'cairo';
 import GLib from 'gi://GLib';
 import Pango from 'gi://Pango';
 import PangoCairo from 'gi://PangoCairo';
 import System from 'system';
 
+import {L, setLang} from '../extension/core/l10n.js';
+import {
+    ACCESSORIES, STAGE_THRESHOLDS, accessoryEmoji, accessoryName, defaultLifeState, stageName,
+} from '../extension/core/life.js';
 import {Mood, moodEmoji} from '../extension/core/mood.js';
-import {defaultPose, drawPet} from '../extension/art/petArt.js';
+import {decoratePose, defaultPose, drawPet, drawSign, signSize} from '../extension/art/petArt.js';
 
 // Sizes in points, drawn at 2× like the screenshots in the Swift repo's docs/.
 const SCALE = 2;
@@ -89,6 +93,57 @@ function moodSheet() {
     ]];
 }
 
+// Growth stages, hunger and dirt; each accessory; the celebrations (LifeSheet).
+function lifeSheet() {
+    const decorated = (mood, change) => decoratePose(pose(mood, 0.4), {...defaultLifeState(), ...change});
+    const celebrating = (celebration, t, change = {}) => pose(Mood.celebrating, t, {celebration, ...change});
+    return [
+        [
+            ...STAGE_THRESHOLDS.map((xp, stage) => ({poses: [decorated(Mood.happy, {xp})], label: stageName(stage)})),
+            {poses: [decorated(Mood.annoyed, {satiety: 12, xp: 300})], label: L('đói', 'hungry')},
+            {poses: [decorated(Mood.annoyed, {dirt: 3, xp: 300})], label: L('bẩn 3 ngày', 'dirty ×3')},
+        ],
+        [
+            ...ACCESSORIES.map(a => ({
+                poses: [decorated(Mood.normal, {xp: 700, unlocked: [a], wearing: [a]})],
+                label: `${accessoryEmoji(a)} ${accessoryName(a)}`,
+            })),
+            {
+                poses: [decorated(Mood.happy, {xp: 1500, wearing: ['crown', 'sunglasses', 'scarf']})],
+                label: ['crown', 'sunglasses', 'scarf'].map(accessoryEmoji).join(''),
+            },
+        ],
+        [
+            {poses: [celebrating('jump', 0.2, {food: '🍙', foodT: 0.45})], label: L('món ăn rơi', 'treat falls')},
+            {poses: [celebrating('spin', 0.28)], label: 'spin'},
+            {poses: [celebrating('flip', 0.27)], label: 'flip'},
+            {poses: [celebrating('dance', 0.1)], label: 'dance'},
+            {poses: [celebrating('fireworks', 0.3)], label: 'fireworks'},
+            {poses: [celebrating('fireworks', 0.35, {golden: true})], label: L('vàng hiếm', 'rare golden')},
+        ],
+    ];
+}
+
+// The sign at its natural size, on a transparent background like docs/sign.png.
+function renderSign(text, file) {
+    const {width, height} = signSize(text);
+    const surface = new Cairo.ImageSurface(Cairo.Format.ARGB32, Math.ceil(width * SCALE), Math.ceil(height * SCALE));
+    const cr = new Cairo.Context(surface);
+    try {
+        cr.scale(SCALE, SCALE);
+        drawSign(cr, width, height, text);
+    } finally {
+        cr.$dispose();
+    }
+    surface.writeToPNG(file);
+    surface.finish();
+    print(`wrote ${file}`);
+}
+
 const outDir = System.programArgs[0] ?? 'out';
 GLib.mkdir_with_parents(outDir, 0o755);
+// The sheets are labelled in English, like the reference screenshots.
+setLang('en');
 renderSheet(moodSheet(), GLib.build_filenamev([outDir, 'moods.png']));
+renderSheet(lifeSheet(), GLib.build_filenamev([outDir, 'life.png']));
+renderSign('Write the weekly report', GLib.build_filenamev([outDir, 'sign.png']));
