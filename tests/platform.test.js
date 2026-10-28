@@ -106,6 +106,7 @@ class FakeWindow extends FakeObject {
         super();
         this.wmClass = wmClass;
         this.title = title;
+        this.titleReads = 0;
     }
 
     get_wm_class() {
@@ -113,7 +114,13 @@ class FakeWindow extends FakeObject {
     }
 
     get_title() {
+        this.titleReads += 1;
         return this.title;
+    }
+
+    // The signals connected, by name.
+    get signals() {
+        return [...this._handlers.values()].map(h => h.name).sort();
     }
 }
 
@@ -144,22 +151,31 @@ function focusWatch(t) {
 
     display.focus_window = code;
     watch.start();
-    t.eq(watch.current, {appName: 'Visual Studio Code', wmClass: 'Code', title: 'main.js - todopet', isBrowser: false,
-        since: new Date(1000)}, 'start() reads the focused window');
+    t.eq(watch.current, {appName: 'Visual Studio Code', wmClass: 'Code', title: null, isBrowser: false,
+        since: new Date(1000)}, 'start() reads the focused window: an app that is not a browser has no title');
     t.eq(watch.lastSwitch, new Date(1000), 'lastSwitch starts at start()');
+    t.eq([code.titleReads, code.signals], [0, ['unmanaged']],
+        'the title of a window that is not a browser is never read, and its title changes are not followed');
 
     clock = 2000;
     code.title = 'calendar.js - todopet';
     code.fire('notify::title');
-    t.eq([watch.current.title, watch.current.since, watch.lastSwitch, changes.length],
-        ['calendar.js - todopet', new Date(1000), new Date(1000), 1], 'a title change keeps since and emits changed');
+    t.eq([watch.current.title, code.titleReads, changes.length], [null, 0, 0], 'so a new title there changes nothing');
 
     clock = 3000;
     display.focus_window = web;
     display.fire('notify::focus-window');
-    t.eq([watch.current.appName, watch.current.isBrowser, watch.current.since, watch.lastSwitch, changes.length],
-        ['Google Chrome', true, new Date(3000), new Date(3000), 2], 'moving focus to another window is a switch');
-    t.eq(code.connections, 0, 'the previous window is no longer watched');
+    t.eq([watch.current.appName, watch.current.isBrowser, watch.current.title, watch.current.since, watch.lastSwitch,
+        changes.length], ['Google Chrome', true, 'Watch later - YouTube - Google Chrome', new Date(3000), new Date(3000), 1],
+    'moving focus to another window is a switch; a browser\'s title is read');
+    t.eq([code.connections, web.signals], [0, ['notify::title', 'unmanaged']],
+        'the previous window is no longer watched; the browser\'s title is followed');
+
+    clock = 3500;
+    web.title = 'Cats - YouTube - Google Chrome';
+    web.fire('notify::title');
+    t.eq([watch.current.title, watch.current.since, watch.lastSwitch, changes.length],
+        ['Cats - YouTube - Google Chrome', new Date(3000), new Date(3000), 2], 'a browser title change keeps since and emits changed');
 
     clock = 4000;
     display.focus_window = null;

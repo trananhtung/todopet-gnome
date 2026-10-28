@@ -9,7 +9,7 @@
 //     claudeFactory(key, model) -> ClaudeClient
 //     env       {idleSeconds(), secondsSinceKey(), focus() -> {appName, wmClass, title, isBrowser, since}|null,
 //                lastAppSwitch() -> Date, speak(text), play(chime), lookupSecret(item), storeSecret(item, v),
-//                clearSecret(item), openURL(url)}
+//                clearSecret(item), openURL(url)}; focus().title is null unless isBrowser (only a browser's is read)
 //     store     {load(name), save(name, obj)} for the pet's life and the postponed-tasks log; files: the diary's files
 //
 // Events (brain.on(name, cb)): 'changed' after any change the UI shows; 'bubble' with the new bubble, or null when

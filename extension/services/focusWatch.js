@@ -1,6 +1,7 @@
-// The focused window: app name, window class and title (replaces NSWorkspace.frontmostApplication and the
-// didActivateApplication observer). Follows `notify::focus-window` on the display and `notify::title` on the
-// focused window.
+// The focused window: app name, window class and, for a browser only, the title (replaces
+// NSWorkspace.frontmostApplication and the didActivateApplication observer). Follows `notify::focus-window` on the
+// display, and `notify::title` on the focused window when it is a browser. The title of any other window is never
+// read: the brain matches sites by a browser's title, and other apps by name and window class.
 //
 // The display and the Shell.WindowTracker are passed in (App passes Shell.WindowTracker.get_default(); the
 // display defaults to global.display, read in start()), so this file imports no Shell library and plain gjs
@@ -23,7 +24,8 @@ export function isBrowserWindow(wmClass, appId) {
 }
 
 // `current` is {appName, wmClass, title, isBrowser, since: Date} or null when no window has focus (the desktop,
-// the overview). `since` is when focus moved to that window; a new title on the same window keeps it.
+// the overview). `title` is null unless isBrowser. `since` is when focus moved to that window; a new title on the
+// same (browser) window keeps it.
 // `lastSwitch` is when focus last moved to a different window. Emits 'changed' with `current`.
 export class FocusWatch extends Emitter {
     constructor({display = null, tracker = null, now = () => new Date()} = {}) {
@@ -95,13 +97,14 @@ export class FocusWatch extends Emitter {
         this._window = win;
         this._since = since;
         this._windowIds = [
-            win.connect('notify::title', () => this._onTitle(win)),
             // A closed window must not be kept alive by this watch.
             win.connect('unmanaged', () => {
                 if (win === this._window)
                     this._unwatch();
             }),
         ];
+        if (this._isBrowser(win))
+            this._windowIds.push(win.connect('notify::title', () => this._onTitle(win)));
     }
 
     _unwatch() {
@@ -112,14 +115,20 @@ export class FocusWatch extends Emitter {
         this._since = null;
     }
 
+    _isBrowser(win) {
+        const app = this._tracker?.get_window_app(win) ?? null;
+        return isBrowserWindow(win.get_wm_class() ?? '', app?.get_id() ?? '');
+    }
+
     _describe(win) {
         const app = this._tracker?.get_window_app(win) ?? null;
         const wmClass = win.get_wm_class() ?? '';
+        const browser = isBrowserWindow(wmClass, app?.get_id() ?? '');
         return {
             appName: app?.get_name() || wmClass,
             wmClass,
-            title: win.get_title() ?? '',
-            isBrowser: isBrowserWindow(wmClass, app?.get_id() ?? ''),
+            title: browser ? win.get_title() ?? '' : null,
+            isBrowser: browser,
             since: this._since,
         };
     }

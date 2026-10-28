@@ -183,11 +183,17 @@ async function calm(t) {
 }
 
 async function distraction(t) {
+    // FocusWatch reads no title for a window that is not a browser: apps go by name and window class alone.
     const steam = makeBrain({active: three(), mood: 'normal', now: at('2026-10-27T15:03'),
-        env: {focus: {appName: 'Steam', wmClass: 'steam', title: 'Library', isBrowser: false, since: at('2026-10-27T15:00')}}});
+        env: {focus: {appName: 'Steam', wmClass: 'Steam', title: null, isBrowser: false, since: at('2026-10-27T15:00')}}});
     await steam.start(); await steam.refresh(); steam.tick(at('2026-10-27T15:03:01'));
     t.check(steam.lastRule === 'distraction' && steam.bubble.text === 'Hey! On Steam? 👀 3 task(s) left.',
-        'a distracting app, matched by its name');
+        'a distracting app, matched by its name (no window title)');
+    const byClass = makeBrain({active: three(), mood: 'normal', now: at('2026-10-27T15:03'),
+        env: {focus: {appName: 'Valve Launcher', wmClass: 'steam', title: null, isBrowser: false, since: at('2026-10-27T15:00')}}});
+    await byClass.start(); await byClass.refresh(); byClass.tick(at('2026-10-27T15:03:01'));
+    t.check(byClass.lastRule === 'distraction' && byClass.bubble.text === 'Hey! On Valve Launcher? 👀 3 task(s) left.',
+        'a distracting app, matched by its window class (no window title)');
 
     const unwatched = makeBrain({active: three(), mood: 'normal', prefs: {watchBrowsers: false}, now: at('2026-10-27T15:03'),
         env: {focus: youtube(at('2026-10-27T15:00'))}});
