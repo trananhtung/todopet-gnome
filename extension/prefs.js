@@ -26,7 +26,6 @@ import {dataDir} from './services/store.js';
 import {hotkeyLabel} from './ui/boardLogic.js';
 
 const BIND = Gio.SettingsBindFlags;
-const DEFAULT_HOTKEY = ['<Control><Super>t'];
 
 // Row and group titles, subtitles and descriptions are Pango markup in libadwaita; ours are plain text.
 const esc = text => GLib.markup_escape_text(text, -1);
@@ -495,7 +494,8 @@ class SettingsWindow {
         const show = () => {
             const accels = this._settings.get_strv(r.key);
             row.subtitle = esc(hotkeyLabel(accels) || L('Đã tắt', 'Disabled'));
-            reset.sensitive = accels.join('\n') !== DEFAULT_HOTKEY.join('\n');
+            // The schema's default is the one to go back to (settings.reset).
+            reset.sensitive = accels.join('\n') !== this._settings.get_default_value(r.key).deepUnpack().join('\n');
         };
         show();
         this._build.ids.push(this._settings.connect(`changed::${r.key}`, show));
