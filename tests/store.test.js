@@ -1,12 +1,14 @@
-// Tests for services/store.js (JSON files and diary files on disk) and services/secrets.js (libsecret).
+// Tests for services/store.js (JSON files and diary files on disk) and services/secrets.js (libsecret), and that
+// nothing but an import() on first use reaches libsecret (gir1.2-secret-1 is not a dependency of GNOME Shell).
 // Everything lives in temp directories: nothing here may touch the real ~/.local/share/todopet.
 import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
 import Secret from 'gi://Secret';
 
+import {SECRET_ANTHROPIC, SECRET_TODOIST} from '../extension/core/secretNames.js';
 import {DiaryFiles, JsonStore, dataDir} from '../extension/services/store.js';
 import {
-    SECRET_ANTHROPIC, SECRET_SCHEMA, SECRET_TODOIST, clearSecret, lookupSecret, storeSecret,
+    _schemaCreated, clearSecret, lookupSecret, secretSchema, storeSecret,
 } from '../extension/services/secrets.js';
 import {rmTree, sleep, tmpDir} from './helpers.js';
 
@@ -290,9 +292,51 @@ async function secretServiceReady() {
     }
 }
 
+// The repository's extension/ folder, found relative to this file so the cwd does not matter.
+const EXTENSION_DIR = Gio.File.new_for_uri(import.meta.url).get_parent().get_parent().get_child('extension');
+
+// What `path` (relative to extension/) imports with static import declarations, and what those files import, and so
+// on: the module specifiers ('gi://Secret', 'resource:///...', and the files as paths relative to extension/).
+// import() calls are not followed: they load on first use.
+function staticImportClosure(path) {
+    const seen = new Set();
+    const specifiers = new Set();
+    const visit = file => {
+        const rel = EXTENSION_DIR.get_relative_path(file);
+        if (seen.has(rel))
+            return;
+        seen.add(rel);
+        specifiers.add(rel);
+        const text = decoder.decode(file.load_contents(null)[1]);
+        for (const [, spec] of text.matchAll(/^import\s+(?:[^'"();]*?\s+from\s+)?['"]([^'"]+)['"]/gm)) {
+            if (spec.startsWith('.'))
+                visit(file.get_parent().resolve_relative_path(spec));
+            else
+                specifiers.add(spec);
+        }
+    };
+    visit(EXTENSION_DIR.resolve_relative_path(path));
+    return specifiers;
+}
+
+function lazyLibsecretTests(t) {
+    t.eq([SECRET_TODOIST, SECRET_ANTHROPIC], ['todoist-token', 'anthropic-key'], 'core/secretNames.js: the secret item names');
+    t.check(!_schemaCreated(), 'importing services/secrets.js makes no libsecret schema');
+    const app = staticImportClosure('extension.js');
+    t.check(app.has('ui/app.js') && app.has('brain.js') && app.has('core/secretNames.js') && app.has('gi://Shell'),
+        'the import walk follows extension.js into the app, the brain and the Shell libraries');
+    for (const entry of ['extension.js', 'brain.js', 'prefs.js']) {
+        const closure = staticImportClosure(entry);
+        t.check(!closure.has('gi://Secret') && !closure.has('services/secrets.js'),
+            `${entry} does not import libsecret or services/secrets.js, not even through another file`);
+    }
+    t.check(staticImportClosure('services/secrets.js').has('gi://Secret'), 'only services/secrets.js does');
+}
+
 async function secretsTests(t) {
-    t.eq([SECRET_TODOIST, SECRET_ANTHROPIC], ['todoist-token', 'anthropic-key'], 'secret item names');
-    t.eq(SECRET_SCHEMA.name, 'org.gnome.shell.extensions.todopet.Secret', 'the secret schema id');
+    lazyLibsecretTests(t);
+    t.eq(secretSchema().name, 'org.gnome.shell.extensions.todopet.Secret', 'the secret schema id');
+    t.check(_schemaCreated() && secretSchema() === secretSchema(), 'the schema is made once, on first use');
 
     await t.rejects(storeSecret('', 'x'), e => e instanceof TypeError, 'storeSecret refuses an empty item name');
     await t.rejects(storeSecret('test-item', ''), e => e instanceof TypeError, 'and an empty secret (clearSecret is for that)');
@@ -309,7 +353,7 @@ async function secretsTests(t) {
         await storeSecret('test-item', 'second-value');
         t.eq(await lookupSecret('test-item'), 'second-value', 'storing again replaces the value');
 
-        const found = await Secret.password_search(SECRET_SCHEMA, {item: 'test-item'}, Secret.SearchFlags.ALL, null);
+        const found = await Secret.password_search(secretSchema(), {item: 'test-item'}, Secret.SearchFlags.ALL, null);
         t.check(found.length === 1 && found[0].get_label() === 'TodoPet: test-item'
             && found[0].get_attributes().item === 'test-item', 'one keyring item, labelled "TodoPet: ...", with the attribute item');
         t.eq(await lookupSecret('test-item-other'), null, 'other items are separate');

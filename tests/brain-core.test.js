@@ -1,7 +1,7 @@
 // The brain's state, sync, mood, life settlement and talking (Task 14), with every service faked.
 import {getLang, setLang} from '../extension/core/l10n.js';
 import {setLinesRandom} from '../extension/core/lines.js';
-import {SECRET_TODOIST} from '../extension/services/secrets.js';
+import {SECRET_TODOIST} from '../extension/core/secretNames.js';
 import {MemoryStore, at, done, makeBrain, task} from './helpers.js';
 
 const SECOND = 1000;

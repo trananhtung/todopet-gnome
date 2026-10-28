@@ -50,6 +50,14 @@ Một chú pet nhỏ cho Ubuntu (GNOME Shell), đi dạo dọc đáy màn hình,
 
 Cần **GNOME Shell 50** (Ubuntu 26.04) với phiên **Wayland**, cùng `git` và `make`.
 
+TodoPet lưu token Todoist và key Claude trong GNOME Keyring qua libsecret, cần gói `gir1.2-secret-1`. Gói này thường đã có sẵn; nếu chưa có:
+
+```bash
+sudo apt install gir1.2-secret-1
+```
+
+Thiếu gói này pet vẫn chạy, nhưng không giữ được token Todoist hay key Claude.
+
 ```bash
 git clone https://github.com/trananhtung/todopet-gnome.git
 cd todopet-gnome

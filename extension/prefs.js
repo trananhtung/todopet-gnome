@@ -18,6 +18,7 @@ import Gtk from 'gi://Gtk';
 import {ExtensionPreferences} from 'resource:///org/gnome/Shell/Extensions/js/extensions/prefs.js';
 
 import {L, getLang, setLang} from './core/l10n.js';
+import {SECRET_ANTHROPIC, SECRET_TODOIST} from './core/secretNames.js';
 import {
     SPEECH_TEST_LINE, captureMessage, captureStep, hourLimits, hourText, joinLinksStatus, percentText, settingsPages,
 } from './core/settingsSpec.js';
@@ -46,7 +47,7 @@ function memorySecrets() {
 async function keyringSecrets() {
     const secrets = await import('./services/secrets.js');
     return {
-        items: {todoist: secrets.SECRET_TODOIST, claude: secrets.SECRET_ANTHROPIC},
+        items: {todoist: SECRET_TODOIST, claude: SECRET_ANTHROPIC},
         lookup: secrets.lookupSecret,
         store: secrets.storeSecret,
         clear: secrets.clearSecret,

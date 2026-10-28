@@ -10,8 +10,8 @@ import {L} from '../core/l10n.js';
 import {LifeRules} from '../core/life.js';
 import {Lines} from '../core/lines.js';
 import {Task} from '../core/models.js';
+import {SECRET_ANTHROPIC} from '../core/secretNames.js';
 import {ClaudeError} from '../services/claude.js';
-import {SECRET_ANTHROPIC} from '../services/secrets.js';
 
 const MINUTE = 60 * 1000;
 // Swift's Date.distantPast.

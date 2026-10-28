@@ -50,6 +50,14 @@ The screenshots come from a headless GNOME Shell running the built-in demo data 
 
 You need **GNOME Shell 50** (Ubuntu 26.04) in a **Wayland** session, plus `git` and `make`.
 
+TodoPet keeps your Todoist token and Claude key in GNOME Keyring through libsecret, which needs the `gir1.2-secret-1` package. It is usually installed already; if not:
+
+```bash
+sudo apt install gir1.2-secret-1
+```
+
+Without it the pet still runs, but it can't keep a Todoist token or a Claude key.
+
 ```bash
 git clone https://github.com/trananhtung/todopet-gnome.git
 cd todopet-gnome

@@ -7,8 +7,8 @@ import {dayKey, parseDate, utcString} from '../extension/core/dates.js';
 import {Emitter} from '../extension/core/emitter.js';
 import {Task, statsFromApi} from '../extension/core/models.js';
 import {Prefs} from '../extension/core/prefs.js';
+import {SECRET_TODOIST} from '../extension/core/secretNames.js';
 import {DemoService} from '../extension/services/demo.js';
-import {SECRET_TODOIST} from '../extension/services/secrets.js';
 import {TodoError} from '../extension/services/todoist.js';
 
 const copy = value => JSON.parse(JSON.stringify(value));

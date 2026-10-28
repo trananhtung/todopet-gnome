@@ -28,7 +28,6 @@ import {ClaudeClient} from '../services/claude.js';
 import {DemoService} from '../services/demo.js';
 import {FocusWatch} from '../services/focusWatch.js';
 import {IdleWatch} from '../services/idle.js';
-import {clearSecret, lookupSecret, storeSecret} from '../services/secrets.js';
 import {SessionWatch} from '../services/session.js';
 import {playChime} from '../services/sound.js';
 import {speak} from '../services/speech.js';
@@ -54,6 +53,26 @@ function memorySecrets() {
         clearSecret: async item => {
             items.delete(item);
         },
+    };
+}
+
+// The keyring, through services/secrets.js. That file needs libsecret (gir1.2-secret-1), which GNOME Shell does not
+// depend on, so it is imported on the first call: without it every call rejects, which the brain treats as "the
+// keyring is not available", and the rest of the extension runs. The failure is logged once.
+function keyringSecrets() {
+    let loading = null;
+    const secrets = () => {
+        loading ??= import('../services/secrets.js').catch(e => {
+            console.warn('TodoPet: the keyring is unavailable, libsecret could not be loaded ' +
+                `(is gir1.2-secret-1 installed?): ${e?.message ?? e}`);
+            throw e;
+        });
+        return loading;
+    };
+    return {
+        lookupSecret: async item => (await secrets()).lookupSecret(item),
+        storeSecret: async (item, value) => (await secrets()).storeSecret(item, value),
+        clearSecret: async item => (await secrets()).clearSecret(item),
     };
 }
 
@@ -297,9 +316,7 @@ export class App {
     // What the brain reads from the Shell and does through it (see the env contract in brain.js).
     _makeEnv() {
         const nested = GLib.getenv('TODOPET_NESTED') === '1';
-        const secrets = GLib.getenv('TODOPET_NO_SECRETS') === '1'
-            ? memorySecrets()
-            : {lookupSecret, storeSecret, clearSecret};
+        const secrets = GLib.getenv('TODOPET_NO_SECRETS') === '1' ? memorySecrets() : keyringSecrets();
         return {
             idleSeconds: () => this.idle?.idleSeconds() ?? 0,
             secondsSinceKey: () => this.idle?.secondsSinceKey() ?? 1e9,

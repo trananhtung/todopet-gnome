@@ -2,7 +2,7 @@
 // focus/break timer (Task 16), with every service faked. Also the keyring hand-off from Task 14's review.
 import {getLang, setLang} from '../extension/core/l10n.js';
 import {Lines, setLinesRandom} from '../extension/core/lines.js';
-import {SECRET_ANTHROPIC, SECRET_TODOIST} from '../extension/services/secrets.js';
+import {SECRET_ANTHROPIC, SECRET_TODOIST} from '../extension/core/secretNames.js';
 import {MemoryStore, at, makeBrain, task} from './helpers.js';
 
 const TODAY = '2026-10-27';

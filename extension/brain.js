@@ -33,12 +33,12 @@ import {CELEBRATION_KINDS, FOODS, GOLDEN_FOOD, LifeRules, PetLife, accessoryEmoj
 import {Lines} from './core/lines.js';
 import {DaySnapshot} from './core/models.js';
 import {Mood, defaultMoodInputs, evaluateMood, moodLabel} from './core/mood.js';
+import {SECRET_ANTHROPIC, SECRET_TODOIST} from './core/secretNames.js';
 import {isBrowser, matchTitle} from './core/sites.js';
 import {StuckTracker} from './core/stuck.js';
 import {installActions} from './brain/actions.js';
 import {installRules} from './brain/rules.js';
 import {demoEvents} from './services/demo.js';
-import {SECRET_ANTHROPIC, SECRET_TODOIST} from './services/secrets.js';
 import {shouldPlay} from './services/sound.js';
 
 const SECOND = 1000;
