@@ -5,6 +5,7 @@ import {T} from './harness.js';
 // Append new test modules here. Each one exports `default async function (t)`.
 const TESTS = [
     './smoke.test.js',
+    './core-basics.test.js',
 ];
 
 const t = new T();
