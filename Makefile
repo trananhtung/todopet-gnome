@@ -22,7 +22,7 @@ build:
 test: build
 	TZ=Asia/Ho_Chi_Minh gjs -m tests/run.js
 
-# tools/ is empty (so untracked by git) until the first tool lands; don't fail on that.
+# tools/ may hold only shell scripts, which ESLint skips; don't fail on an unmatched pattern.
 lint:
 	@npx eslint --no-error-on-unmatched-pattern extension tests tools
 
@@ -31,10 +31,8 @@ snapshot:
 	@test -f tools/snapshot.js || { echo "tools/snapshot.js does not exist yet" >&2; exit 1; }
 	gjs -m tools/snapshot.js out
 
-# Runs the isolated nested GNOME Shell; pass scenes as ARGS="prefs:General ..."
-# (tools/nested.sh arrives with the nested-harness task).
+# Runs the isolated nested GNOME Shell and plays the dev scenes (all of them, or ARGS="prefs:General ...").
 nested:
-	@test -f tools/nested.sh || { echo "tools/nested.sh does not exist yet" >&2; exit 1; }
 	tools/nested.sh $(ARGS)
 
 # Installs into the current user's GNOME Shell extensions directory (override with EXT_DIR=...).
