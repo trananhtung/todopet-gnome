@@ -41,6 +41,60 @@ export function placeBubble({petFrame, size, workArea, unit = 1}) {
     return {x, y, tailX: petCenter - x - pad};
 }
 
+// Whether two rectangles {x, y, width, height} overlap (touching edges do not); null overlaps nothing.
+export function rectsOverlap(a, b) {
+    if (!a || !b)
+        return false;
+    return a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height;
+}
+
+// Whether the point (x, y) is inside the rectangle (its left and top edges included); null contains nothing.
+export function insideRect(r, x, y) {
+    return Boolean(r) && x >= r.x && x < r.x + r.width && y >= r.y && y < r.y + r.height;
+}
+
+// Ruling R13: while the task board is open (`board` is its rectangle) the bubble stays off it. Returns
+// {x, y, tailX, spot}; tailX is null when the bubble has no tail.
+//   'pet'           placeBubble's spot does not touch the board: nothing changes.
+//   'above-board'   right above the board, over it and as near the pet as it can be, when that fits in the work area.
+//                   No tail: the board is between the bubble and the pet.
+//   'beside-board'  next to the board (the pet's side first), level with where it would be above the pet. The tail
+//                   points at the pet when the pet is under the bubble, otherwise there is none.
+//   'over'          no room anywhere: placeBubble's spot, over the board.
+export function placeBubbleAround({petFrame, size, workArea, unit = 1, board = null}) {
+    const normal = placeBubble({petFrame, size, workArea, unit});
+    if (!rectsOverlap({x: normal.x, y: normal.y, width: size.width, height: size.height}, board))
+        return {...normal, spot: 'pet'};
+    const gap = BUBBLE.edgeMargin * unit;
+    const margin = BUBBLE.edgeMargin * unit;
+    const pad = BUBBLE.pad * unit;
+    const minX = workArea.x + margin;
+    const maxX = workArea.x + workArea.width - margin - size.width;
+    const petCenter = petFrame.x + petFrame.width / 2;
+    const clamp = (v, lo, hi) => Math.max(lo, Math.min(v, hi));
+
+    const above = board.y - gap - size.height;
+    if (above >= workArea.y) {
+        const overBoard = clamp(petCenter - size.width / 2, board.x, board.x + board.width - size.width);
+        return {x: Math.round(clamp(overBoard, minX, maxX)), y: Math.round(above), tailX: null, spot: 'above-board'};
+    }
+
+    // The tail can point at the pet when the pet's center is under the bubble, 22 px in from the shape's corners.
+    const tailFor = x => {
+        const tailX = petCenter - x - pad;
+        const reach = BUBBLE.tailMargin * unit;
+        return tailX >= reach && tailX <= size.width - 2 * pad - reach ? tailX : null;
+    };
+    const left = Math.round(board.x - gap - size.width);
+    const right = Math.round(board.x + board.width + gap);
+    const petSideFirst = petCenter >= board.x + board.width / 2 ? [right, left] : [left, right];
+    const sides = petSideFirst.filter(x => x >= minX && x <= maxX);
+    const x = sides.find(side => tailFor(side) !== null) ?? sides[0];
+    if (x !== undefined)
+        return {x, y: normal.y, tailX: tailFor(x), spot: 'beside-board'};
+    return {...normal, spot: 'over'};
+}
+
 // The quadratic curve p0 -> p1 with control point c, as the cubic one Cairo draws.
 export function quadToCubic(p0, c, p1) {
     return {

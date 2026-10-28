@@ -1,6 +1,6 @@
 import {
-    BUBBLE, bubbleDelayMs, packRows, placeBubble, quadToCubic, responseFor, shadowLayers, shouldShowBubble,
-    tailCurves,
+    BUBBLE, bubbleDelayMs, insideRect, packRows, placeBubble, placeBubbleAround, quadToCubic, rectsOverlap, responseFor,
+    shadowLayers, shouldShowBubble, tailCurves,
 } from '../extension/ui/bubbleLogic.js';
 
 // The nested shell's work area: a 1600×900 monitor under a 32 px top bar.
@@ -123,4 +123,73 @@ export default async function (t) {
     t.eq(bubbleDelayMs(bubble({seconds: -3})), 0, 'a negative time is over at once');
     t.eq(BUBBLE.width, 270, 'Swift\'s BubbleView.width');
     t.check(BUBBLE.width + 2 * BUBBLE.pad <= 320, 'the whole bubble is at most 320 px wide');
+
+    aroundTheBoard(t);
+}
+
+// R13: while the task board is open the bubble keeps off it. A view 290 × 150 (the shadow room included).
+function aroundTheBoard(t) {
+    const size = {width: 290, height: 150};
+    const rect = (p, s = size) => ({x: p.x, y: p.y, width: s.width, height: s.height});
+
+    t.check(rectsOverlap({x: 0, y: 0, width: 10, height: 10}, {x: 5, y: 5, width: 10, height: 10}), 'rectangles that overlap');
+    t.check(!rectsOverlap({x: 0, y: 0, width: 10, height: 10}, {x: 10, y: 0, width: 10, height: 10}), 'touching is not overlapping');
+    t.check(!rectsOverlap({x: 0, y: 0, width: 10, height: 10}, null), 'no rectangle overlaps nothing');
+    const r = {x: 10, y: 10, width: 100, height: 50};
+    t.check(insideRect(r, 10, 10) && insideRect(r, 109.5, 59.5), 'a point inside a rectangle, edges included');
+    t.check(!insideRect(r, 110, 30) && !insideRect(r, 50, 60) && !insideRect(null, 0, 0), 'and points outside it');
+
+    {
+        const p = placeBubbleAround({petFrame: PET, size, workArea: WA});
+        t.eq(p, {...placeBubble({petFrame: PET, size, workArea: WA}), spot: 'pet'}, 'no board: above the pet as always');
+        const far = placeBubbleAround({petFrame: PET, size, workArea: WA, board: {x: 10, y: 100, width: 372, height: 600}});
+        t.eq(far, {x: 655, y: 679, tailX: 135, spot: 'pet'}, 'a board that is not in the way changes nothing');
+    }
+    {
+        // A tall screen: the board stands above the pet and there is room above the board.
+        const wa = {x: 0, y: 32, width: 1600, height: 1048};
+        const pet = {x: 738, y: 956, width: 124, height: 124};
+        const board = {x: 615, y: 300, width: 372, height: 650};
+        const p = placeBubbleAround({petFrame: pet, size, workArea: wa, board});
+        t.eq(p, {x: 655, y: 300 - 4 - 150, tailX: null, spot: 'above-board'},
+            'the bubble would cover the board: it goes right above it, without a tail (the board is in between)');
+        t.check(!rectsOverlap(rect(p), board), 'and does not touch it');
+        const off = placeBubbleAround({petFrame: {...pet, x: 1300}, size, workArea: wa, board: {...board, x: 990}});
+        t.eq(off.x, 990 + 372 - 290, 'right above the board: it stays over the board, as near the pet as it can');
+    }
+    {
+        // The nested screen: the board above the pet reaches the top of the work area.
+        const pet = {x: 1336, y: 782, width: 124, height: 124};
+        const board = {x: 1212, y: 105, width: 372, height: 706};
+        const p = placeBubbleAround({petFrame: pet, size, workArea: WA, board});
+        t.eq(p, {x: 1212 - 4 - 290, y: 679, tailX: null, spot: 'beside-board'},
+            'no room above the board: beside it, level with the pet; no tail when the pet is not under the bubble');
+        t.check(!rectsOverlap(rect(p), board), 'off the board');
+        // Room on both sides and no tail either way: the side of the board the pet is on (here just right of its center).
+        const both = placeBubbleAround({petFrame: PET, size, workArea: WA, board: {x: 600, y: 105, width: 372, height: 706}});
+        t.eq(both, {x: 972 + 4, y: 679, tailX: null, spot: 'beside-board'}, 'room on both sides: the pet\'s side');
+    }
+    {
+        // The pet in the middle, the board to its left: the bubble goes on the pet's side and still points at it.
+        const board = {x: 362, y: 120, width: 372, height: 772};
+        const p = placeBubbleAround({petFrame: PET, size, workArea: WA, board});
+        t.eq(p, {x: 734 + 4, y: 679, tailX: 800 - 738 - 10, spot: 'beside-board'}, 'beside the board, its tail on the pet');
+        t.check(!rectsOverlap(rect(p), board), 'off the board, too');
+        const mirrored = placeBubbleAround({petFrame: PET, size, workArea: WA, board: {...board, x: 866}});
+        t.eq([mirrored.x, mirrored.spot], [866 - 4 - 290, 'beside-board'], 'the board to the pet\'s right: on its left side');
+        t.eq(mirrored.tailX, 800 - 572 - 10, 'pointing at the pet');
+    }
+    {
+        const narrow = {x: 0, y: 32, width: 700, height: 868};
+        const pet = {x: 300, y: 782, width: 124, height: 124};
+        const p = placeBubbleAround({petFrame: pet, size, workArea: narrow, board: {x: 150, y: 40, width: 372, height: 850}});
+        t.eq(p, {x: 217, y: 679, tailX: 135, spot: 'over'}, 'no room anywhere: over the board, above the pet as always');
+    }
+    {
+        const wa = {x: 0, y: 0, width: 3200, height: 1800};
+        const pet = {x: 1476, y: 1500, width: 248, height: 248};
+        const board = {x: 1228, y: 400, width: 744, height: 1080};
+        const p = placeBubbleAround({petFrame: pet, size: {width: 580, height: 300}, workArea: wa, board, unit: 2});
+        t.eq([p.y, p.spot], [400 - 8 - 300, 'above-board'], 'the gap scales with the stage');
+    }
 }

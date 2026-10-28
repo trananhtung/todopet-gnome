@@ -8,6 +8,8 @@
 //                                  it) above the pet; one that is already up is replaced (no new fade-in)
 //   hide()                         takes it away at once, reporting nothing (the brain took it away itself)
 //   follow(petFrame)               keeps it above the pet while the pet moves (a no-op when nothing changed)
+//   avoid(rect|null)               the open task board's rectangle: the bubble keeps off it (ruling R13, see
+//                                  placeBubbleAround); null when the board closes, and it goes back above the pet
 //   visible, destroy()
 //
 // What it tells the brain (ui/bubbleLogic.js decides): a tapped button -> noteResponse({picked: title}), then
@@ -17,7 +19,7 @@
 //
 // Like the pet, the actor stays allocated at (0, 0) and moves by its translation: a new allocation would repaint the
 // shape and make the layout manager look at the chrome again on every step of a walk or drag.
-// For the dev scenes: frame, tailX, textActor, closeButton, actionButtons.
+// For the dev scenes: frame, tailX (null: no tail), spot, textActor, closeButton, actionButtons.
 import Clutter from 'gi://Clutter';
 import GLib from 'gi://GLib';
 import Pango from 'gi://Pango';
@@ -28,7 +30,7 @@ import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import {L} from '../core/l10n.js';
 import {moodEmoji} from '../core/mood.js';
 import {
-    BUBBLE, bubbleDelayMs, packRows, placeBubble, quadToCubic, responseFor, shadowLayers, tailCurves,
+    BUBBLE, bubbleDelayMs, packRows, placeBubbleAround, quadToCubic, responseFor, shadowLayers, tailCurves,
 } from './bubbleLogic.js';
 
 // The shape's fill and outline: Swift's windowBackgroundColor and primary at 8%.
@@ -61,7 +63,7 @@ function addTail(cr, tail) {
 }
 
 // Draws the bubble's shape (Swift: BubbleShape with its fill, shadow and outline) into a width × height surface.
-// `tailX` is measured from the shape's left edge, which is `pad` in from the surface's.
+// `tailX` is measured from the shape's left edge, which is `pad` in from the surface's; null draws no tail.
 function drawShape(cr, width, height, {tailX, unit, dark}) {
     const pad = BUBBLE.pad * unit;
     const radius = BUBBLE.radius * unit;
@@ -76,9 +78,9 @@ function drawShape(cr, width, height, {tailX, unit, dark}) {
         cr.fill();
     }
 
-    const tail = tailCurves(tailX + pad, body, unit);
     roundedRect(cr, body.x, body.y, body.width, body.height, radius);
-    addTail(cr, tail);
+    if (tailX !== null)
+        addTail(cr, tailCurves(tailX + pad, body, unit));
     const [r, g, b] = colors.fill;
     cr.setSourceRGB(r, g, b);
     cr.fillPreserve();
@@ -101,6 +103,8 @@ export class BubbleView {
         this._x = null;
         this._y = null;
         this._tailX = 0;
+        this._spot = 'pet';
+        this._avoid = null; // the open board's rectangle
         this._dark = isDark();
         this._signals = []; // on objects that outlive the bubble: the stage's theme, the settings, the display
         this._errors = new Set();
@@ -151,6 +155,11 @@ export class BubbleView {
 
     get tailX() {
         return this._tailX;
+    }
+
+    // Where it is: 'pet', or, while the board is open, 'above-board', 'beside-board' or 'over' (placeBubbleAround).
+    get spot() {
+        return this._spot;
     }
 
     get textActor() {
@@ -207,6 +216,13 @@ export class BubbleView {
         this._clearTimer();
         this._bubble = null;
         this._removeFromChrome();
+    }
+
+    // The task board opened, moved or closed (null): the bubble keeps off its rectangle.
+    avoid(rect) {
+        this._avoid = rect ? {...rect} : null;
+        if (this._inChrome && this._root)
+            this._place(true);
     }
 
     // The pet moved: the bubble goes with it.
@@ -348,18 +364,24 @@ export class BubbleView {
         return {x: area.x, y: area.y, width: area.width, height: area.height};
     }
 
-    // Swift: BubbleController.place. The tail is only redrawn when it moved by more than a pixel.
+    // Swift: BubbleController.place, kept off the open board (R13). The tail is only redrawn when it moved by more
+    // than a pixel, appeared or went.
     _place(force) {
         if (!this._root || !this._petFrame)
             return;
         const unit = this._themeContext.scale_factor;
-        const {x, y, tailX} = placeBubble({petFrame: this._petFrame, size: this._size, workArea: this._workArea(), unit});
+        const {x, y, tailX, spot} = placeBubbleAround({
+            petFrame: this._petFrame, size: this._size, workArea: this._workArea(), unit, board: this._avoid,
+        });
+        this._spot = spot;
         if (force || x !== this._x || y !== this._y) {
             this._x = x;
             this._y = y;
             this._root.set_translation(x, y, 0);
         }
-        if (force || Math.abs(tailX - this._tailX) > 1) {
+        const tailMoved = (tailX === null) !== (this._tailX === null) ||
+            (tailX !== null && Math.abs(tailX - this._tailX) > 1);
+        if (force || tailMoved) {
             this._tailX = tailX;
             this._shape.queue_repaint();
         }

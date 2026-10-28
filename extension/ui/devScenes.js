@@ -15,6 +15,7 @@ import {L} from '../core/l10n.js';
 import {Lines} from '../core/lines.js';
 import {Mood} from '../core/mood.js';
 import {hasSpeech} from '../services/speech.js';
+import {rectsOverlap} from './bubbleLogic.js';
 
 Gio._promisify(Gio.File.prototype, 'replace_async', 'replace_finish');
 Gio._promisify(Gio.OutputStream.prototype, 'close_async', 'close_finish');
@@ -801,7 +802,7 @@ registerScene('board-delete', ctx => withBoard(ctx, Mood.angry, async (board, pe
 
 // "Add a task" with the key focus in it (focusAdd, as the shortcut opens it), a title typed in; Enter adds it and
 // empties the field, the Escape key closes the board.
-registerScene('add', ctx => withBoard(ctx, null, async (board, pet, pointer) => {
+registerScene('add', ctx => withBoard(ctx, null, async board => {
     const {brain} = ctx.app;
     board.open({focusAdd: true});
     await ctx.wait(800);
@@ -829,15 +830,82 @@ registerScene('add', ctx => withBoard(ctx, null, async (board, pet, pointer) => 
     await ctx.wait(300);
     console.log(`TODOPET add closed by the Escape key: ${!board.isOpen}`);
     expect(!board.isOpen, 'the Escape key did not close the board');
+}));
 
-    // An urgent bubble over the open board: a press on its button closes the board and presses the button.
+// Ruling R13: an urgent bubble while the board is open goes next to the board, not over it. A press on the bubble's
+// background leaves the board open; its button works; when the board closes the bubble goes back above the pet.
+registerScene('board-bubble', ctx => withBoard(ctx, Mood.angry, async (board, pet, pointer) => {
+    const {brain, bubble: view} = ctx.app;
     board.open();
-    await ctx.wait(400);
+    await ctx.wait(800);
+    await brain.settle();
     const ran = [];
-    brain.say({text: 'Xin chào 👋', seconds: 30, urgent: true, actions: [{title: 'Ok', primary: true, run: () => ran.push('ok')}]});
+    const say = () => brain.say({
+        text: Lines.added('Call Anna'), seconds: 30, urgent: true,
+        actions: [{title: 'Ok', primary: true, run: () => ran.push('ok')}],
+    });
+    say();
     await ctx.wait(500);
-    expect(board.isOpen && ctx.app.bubble.visible, 'the urgent bubble did not show over the open board');
-    await click(ctx, pointer, ctx.app.bubble.actionButtons[0]);
-    console.log(`TODOPET add bubble pressed over the board: ran=${ran} board open=${board.isOpen} bubble=${ctx.app.bubble.visible}`);
-    expect(ran.join() === 'ok' && !board.isOpen && !ctx.app.bubble.visible, 'the bubble\'s button did not work over the board');
+    const f = view.frame;
+    const b = board.frame;
+    console.log(`TODOPET board-bubble bubble ${JSON.stringify(f)} ${view.spot} tail=${view.tailX} board ${JSON.stringify(b)} ${board.side}`);
+    expect(board.isOpen && view.visible, 'the urgent bubble is not up next to the open board');
+    expect(!rectsOverlap(f, b), 'the bubble covers the board');
+    const wa = pet.workArea;
+    expect(f.x >= wa.x && f.y >= wa.y && f.x + f.width <= wa.x + wa.width && f.y + f.height <= wa.y + wa.height,
+        `the bubble is outside the work area: ${JSON.stringify(f)}`);
+    await ctx.shot('board-bubble');
+
+    // The bubble's background (its text) is not "outside the board".
+    const [tx, ty] = view.textActor.get_transformed_position();
+    const [tw, th] = view.textActor.get_transformed_size();
+    pointer.moveTo(tx + tw / 2, ty + th / 2);
+    await ctx.wait(150);
+    pointer.press();
+    await ctx.wait(60);
+    pointer.release();
+    await ctx.wait(300);
+    console.log(`TODOPET board-bubble background pressed: board open=${board.isOpen} bubble=${view.visible}`);
+    expect(board.isOpen && view.visible, 'a press on the bubble closed the board or the bubble');
+
+    // The board closes: the bubble goes back above the pet, its tail on the pet.
+    board.handleKey(Clutter.KEY_Escape);
+    await ctx.wait(300);
+    console.log(`TODOPET board-bubble after the board closed: ${view.spot} ${JSON.stringify(view.frame)}`);
+    expect(!board.isOpen && view.visible && view.spot === 'pet', 'the bubble did not go back above the pet');
+    expectPlaced(view, pet);
+
+    // Its button works over the open board, and the board stays open.
+    board.open();
+    await ctx.wait(500);
+    say();
+    await ctx.wait(500);
+    await click(ctx, pointer, view.actionButtons[0]);
+    console.log(`TODOPET board-bubble button pressed: ran=${ran} board open=${board.isOpen} bubble=${view.visible}`);
+    expect(ran.join() === 'ok' && board.isOpen && !view.visible, 'the bubble\'s button did not work next to the board');
+}));
+
+// The pet hidden for an hour: the board it had open closes once, and the board opened while the pet is away stays
+// open (in the corner under the panel) across the 1-second visibility ticks.
+registerScene('board-hidden', ctx => withBoard(ctx, null, async (board, pet) => {
+    const {prefs} = ctx.app;
+    board.open();
+    await ctx.wait(500);
+    expect(board.isOpen && pet.visible, 'the board is not open next to the pet');
+    prefs.hiddenUntil = Date.now() + 3600 * 1000;
+    try {
+        await ctx.wait(300);
+        console.log(`TODOPET board-hidden pet hidden: pet=${pet.visible} board open=${board.isOpen}`);
+        expect(!pet.visible && !board.isOpen, 'hiding the pet did not close its board');
+        board.open();
+        await ctx.wait(2600);
+        console.log(`TODOPET board-hidden opened while hidden: open=${board.isOpen} side=${board.side} after 2.6 s`);
+        expect(board.isOpen && board.side === 'corner', 'the board opened while the pet is hidden did not stay open');
+        await ctx.shot('board-hidden');
+    } finally {
+        board.close();
+        prefs.hiddenUntil = 0;
+    }
+    await ctx.wait(300);
+    expect(pet.visible, 'the pet did not come back');
 }));

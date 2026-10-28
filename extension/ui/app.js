@@ -361,17 +361,19 @@ export class App {
         this.board?.toggle();
     }
 
-    // The pet hides while the screen is locked and while `hidden-until` (epoch ms) is ahead.
+    // The pet hides while the screen is locked and while `hidden-until` (epoch ms) is ahead. Runs on every tick.
     _updateVisibility() {
         if (!this.pet || !this.prefs)
             return;
         const hidden = Boolean(this.session?.locked) || this.prefs.hiddenUntil > Date.now();
         if (hidden) {
-            // A bubble has no business on screen without the pet it points at; the board closes too (Swift: hidePet).
+            // A bubble has no business on screen without the pet it points at. The board closes once, when the pet
+            // goes (Swift: hidePet); opened while the pet is away, it stays (in the corner under the panel).
             const bubble = this.bubble?.bubble;
             if (bubble)
                 this.brain?.dismissBubble(bubble.id);
-            this.board?.close();
+            if (this.pet.visible)
+                this.board?.close();
             this.pet.hide();
         } else {
             this.pet.show();

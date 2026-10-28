@@ -27,6 +27,7 @@ import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import {Spinner} from 'resource:///org/gnome/shell/ui/animation.js';
 
 import {L, getLang} from '../core/l10n.js';
+import {insideRect} from './bubbleLogic.js';
 import {
     BOARD, addPlaceholder, boardModel, dueChoices, hotkeyLabel, listHeight, placeBoard, priorityChoices,
 } from './boardLogic.js';
@@ -211,6 +212,7 @@ export class Board {
                 Main.layoutManager.removeChrome(this._root);
         }
         this._inChrome = false;
+        this._app.bubble?.avoid(null);
         // Swift: popoverDidClose drops the split view, the wardrobe and the diary.
         this._destroyPage();
         this._confirmId = null;
@@ -976,6 +978,8 @@ export class Board {
         const petFrame = pet?.visible ? pet.frame : null;
         this._placement = placeBoard({petFrame, size: this._size, workArea: wa, unit});
         this._root.set_position(this._placement.x, this._placement.y);
+        // R13: the pet's bubble keeps off the board.
+        this._app.bubble?.avoid(this.frame);
     }
 
     _workArea() {
@@ -998,8 +1002,9 @@ export class Board {
     // --- Events ---
 
     // The board holds the modal grab: a key goes to handleKey first; a press anywhere outside it closes it and is
-    // used up. Only the pet's bubble stays usable (an urgent one shows while the board is open): a press on one of its
-    // buttons also presses that button, as Swift's transient popover closes and lets the click through.
+    // used up. The pet's bubble is not "outside" (ruling R13; an urgent one shows next to the open board): a press in
+    // its rectangle leaves the board open, and one on its buttons presses that button (the grab keeps the press from
+    // reaching it).
     _onCapturedEvent(event) {
         const type = event.type();
         if (type === Clutter.EventType.KEY_PRESS)
@@ -1008,9 +1013,14 @@ export class Board {
             const target = global.stage.get_event_actor(event);
             if (this._open && !this._root.contains(target)) {
                 const bubbleButton = bubbleButtonAt(target);
+                const bubble = this._app.bubble;
+                const [x, y] = event.get_coords();
+                if (bubbleButton || (bubble?.visible && insideRect(bubble.frame, x, y))) {
+                    if (bubbleButton && event.get_button?.() !== Clutter.BUTTON_SECONDARY)
+                        bubbleButton.emit('clicked', Clutter.BUTTON_PRIMARY);
+                    return Clutter.EVENT_STOP;
+                }
                 this.close();
-                if (bubbleButton && event.get_button?.() !== Clutter.BUTTON_SECONDARY)
-                    bubbleButton.emit('clicked', Clutter.BUTTON_PRIMARY);
                 return Clutter.EVENT_STOP;
             }
             this._tooltips.hide();
