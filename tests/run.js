@@ -6,6 +6,7 @@ import {T} from './harness.js';
 const TESTS = [
     './smoke.test.js',
     './core-basics.test.js',
+    './models.test.js',
 ];
 
 const t = new T();
