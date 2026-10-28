@@ -10,6 +10,8 @@ import Gio from 'gi://Gio';
 import Shell from 'gi://Shell';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
+import {L} from '../core/l10n.js';
+import {Lines} from '../core/lines.js';
 import {Mood} from '../core/mood.js';
 import {hasSpeech} from '../services/speech.js';
 
@@ -248,11 +250,13 @@ function farSide(pet) {
 
 // Runs body(pet, mouse) with the brain's mood pinned to `mood` (null: the brain's own). `still-while-typing` is off
 // meanwhile: a scene's clicks look like typing to the heuristic and would keep the pet still for 20 s (that rule is
-// covered by the unit tests). Afterwards the mood and the setting are back, the pet may walk, and the mouse is away.
+// covered by the unit tests). A bubble that is up (the brain's greeting when it starts) is taken away: the pet stands
+// still while it is shown. Afterwards the mood and the setting are back, the pet may walk, and the mouse is away.
 async function withPet(ctx, mood, body) {
     const {app} = ctx;
     const pet = app.pet;
     expect(pet?.visible, 'the pet is not on screen');
+    app.brain.dismissBubble();
     const still = app.settings.get_boolean('still-while-typing');
     app.settings.set_boolean('still-while-typing', false);
     mouse().moveTo(...AWAY);
@@ -369,6 +373,9 @@ registerScene('focus-chip', ctx => withPet(ctx, null, async pet => {
         console.log(`TODOPET focus mood=${brain.mood} chip=${pet.chipText}`);
         expect(brain.mood === Mood.focus, `the mood is ${brain.mood}, not focus`);
         expect(/^🍅 2[45]:\d\d$/.test(pet.chipText ?? ''), `the chip says '${pet.chipText}'`);
+        // The pet's reply to the session (a bubble) would cover the chip on the head.
+        brain.dismissBubble();
+        await ctx.wait(200);
         await ctx.shot('focus-chip');
     } finally {
         brain.stopFocus();
@@ -396,3 +403,198 @@ registerScene('sleeping', async ctx => {
         settings.set_int('work-end', saved[1]);
     }
 });
+
+// --- The speech bubble (ui/bubble.js) ---
+
+// Moves the pointer onto `actor` (a button) and clicks it, like a person would.
+async function click(ctx, pointer, actor) {
+    const [x, y] = actor.get_transformed_position();
+    const [width, height] = actor.get_transformed_size();
+    pointer.moveTo(x + width / 2, y + height / 2);
+    await ctx.wait(150);
+    pointer.press();
+    await ctx.wait(60);
+    pointer.release();
+    await ctx.wait(300);
+}
+
+// What the diary says about `tag` responses so far.
+const responses = (brain, tag) => brain.diary.today.filter(e => e.kind === 'response' && e.tag === tag).length;
+
+// The bubble is where Swift puts it: inside the work area, at most 320 px wide, its bottom edge 62% up the pet, the
+// tail's tip under the pet's center (the pet is away from the edges in the scenes, so the tail is not pushed aside).
+function expectPlaced(view, pet) {
+    const f = view.frame;
+    const wa = pet.workArea;
+    const p = pet.frame;
+    console.log(`TODOPET bubble frame ${JSON.stringify(f)} tailX ${view.tailX.toFixed(1)} pet ${JSON.stringify(p)}`);
+    expect(f.width <= 320, `the bubble is ${f.width} px wide`);
+    expect(f.x >= wa.x && f.x + f.width <= wa.x + wa.width && f.y >= wa.y && f.y + f.height <= wa.y + wa.height,
+        `the bubble is outside the work area: ${JSON.stringify(f)}`);
+    expect(f.y + f.height <= p.y + p.height * 0.38 + 1, 'the bubble is not above the pet');
+    const tip = f.x + 10 + view.tailX;
+    expect(Math.abs(tip - (p.x + p.width / 2)) <= 1, `the tail points at x ${tip}, the pet is at ${p.x + p.width / 2}`);
+}
+
+// Nothing in the text is cut off: it is not ellipsized, and the label is as tall as its wrapped lines.
+function expectTextWhole(view, minLines) {
+    const label = view.textActor;
+    const layout = label.clutter_text.get_layout();
+    const [, logical] = layout.get_pixel_extents();
+    const [, height] = label.get_transformed_size();
+    console.log(`TODOPET bubble text lines=${layout.get_line_count()} ellipsized=${layout.is_ellipsized()} ` +
+        `text ${logical.width}x${logical.height} label ${Math.round(label.get_transformed_size()[0])}x${Math.round(height)}`);
+    expect(!layout.is_ellipsized(), 'the text is ellipsized');
+    expect(layout.get_line_count() >= minLines, `the text wrapped to ${layout.get_line_count()} lines, not ${minLines}`);
+    expect(height >= logical.height, `the label (${height} px) is shorter than its text (${logical.height} px)`);
+    expect(logical.width <= label.get_transformed_size()[0] + 1, 'the text is wider than its label');
+}
+
+// The pet's morning greeting with its two buttons; a tap on "Later" runs that action and takes the bubble away.
+registerScene('bubble', ctx => withPet(ctx, Mood.annoyed, async (pet, pointer) => {
+    const {brain, bubble: view} = ctx.app;
+    await untilOnGround(ctx, pet);
+    const ran = [];
+    const text = Lines.morning(new Date(), brain.day, brain.target);
+    brain.say({
+        text,
+        seconds: 60,
+        actions: [
+            {title: L('＋ Thêm việc', '＋ Add tasks'), primary: true, run: () => ran.push('add')},
+            {title: L('Để sau', 'Later'), run: () => ran.push('later')},
+        ],
+    }, {why: 'the bubble scene'});
+    await ctx.wait(600);
+    expect(view.visible && brain.bubble?.text === text, 'the bubble is not on screen');
+    expect(view.actionButtons.length === 2, `the bubble has ${view.actionButtons.length} buttons, not 2`);
+    expect(pet.paused, 'the pet does not stand still while the bubble is up');
+    expectPlaced(view, pet);
+    expectTextWhole(view, 1);
+    await ctx.shot('bubble');
+
+    // The pet is picked up and carried 150 px to the left and 60 px up: the bubble goes with it, tail under its center.
+    const start = pet.frame;
+    const x = start.x + start.width / 2;
+    const y = start.y + start.height * 0.6;
+    const before = view.frame;
+    pointer.moveTo(x, y);
+    await ctx.wait(300);
+    pointer.press();
+    for (let step = 1; step <= 10; step++) {
+        await ctx.wait(30);
+        pointer.moveTo(x - 15 * step, y - 6 * step);
+    }
+    await ctx.wait(300);
+    const carried = view.frame;
+    console.log(`TODOPET bubble follows: x ${before.x} -> ${carried.x}, y ${before.y} -> ${carried.y}`);
+    expect(pet.motion.held, 'the pet is not held');
+    expect(carried.x === before.x - 150 && carried.y === before.y - 60, `the bubble did not follow: ${JSON.stringify(carried)}`);
+    expectPlaced(view, pet);
+    pointer.release();
+    await untilOnGround(ctx, pet, 3000);
+    await ctx.wait(300);
+    expect(view.frame.y === before.y && view.frame.x === before.x - 150, `the bubble is not above the pet again: ${JSON.stringify(view.frame)}`);
+    expectPlaced(view, pet);
+
+    await click(ctx, pointer, view.actionButtons[1]);
+    console.log(`TODOPET bubble tapped Later: ran=${ran} visible=${view.visible} brain=${brain.bubble?.id ?? null}`);
+    expect(ran.join() === 'later', `the action did not run once: ${ran}`);
+    expect(!view.visible && brain.bubble === null, 'the bubble is still up after a tap on a button');
+    expect(!pet.paused, 'the pet still stands after the bubble went');
+    expect(responses(brain, 'picked') === 1, 'the diary does not say which button was tapped');
+}));
+
+// A task pushed back for days: three buttons in two rows. The close button takes the bubble away and the diary says
+// it was closed.
+registerScene('bubble-stuck', ctx => withPet(ctx, Mood.annoyed, async (pet, pointer) => {
+    const {brain, bubble: view} = ctx.app;
+    await untilOnGround(ctx, pet);
+    const ran = [];
+    brain.say({
+        text: L('“Trả lời email của sếp” bị dời 4 ngày rồi 😑 Chắc nó to quá? Chia thành bước nhỏ cho dễ bắt đầu nhé.',
+            '“Reply to the boss\'s email” has been pushed for 4 days 😑 Too big? Let\'s split it into small steps.'),
+        seconds: 60,
+        actions: [
+            {title: L('✂️ Chia nhỏ', '✂️ Split it'), primary: true, run: () => ran.push('split')},
+            {title: L('Bỏ khỏi kế hoạch', 'Drop from plan'), run: () => ran.push('drop')},
+            {title: L('Để sau', 'Later'), run: () => ran.push('later')},
+        ],
+    }, {why: 'the bubble-stuck scene'});
+    await ctx.wait(600);
+    expect(view.visible, 'the bubble is not on screen');
+    expect(view.actionButtons.length === 3, `the bubble has ${view.actionButtons.length} buttons, not 3`);
+    const [first, second, third] = view.actionButtons.map(b => b.get_transformed_position()[1]);
+    expect(first === second && third > first, `the buttons are not two to a row: y ${first}, ${second}, ${third}`);
+    expectPlaced(view, pet);
+    expectTextWhole(view, 2);
+    await ctx.shot('bubble-stuck');
+
+    await click(ctx, pointer, view.closeButton);
+    console.log(`TODOPET bubble closed: ran=${ran} visible=${view.visible} brain=${brain.bubble?.id ?? null}`);
+    expect(ran.length === 0, `closing the bubble ran an action: ${ran}`);
+    expect(!view.visible && brain.bubble === null, 'the bubble is still up after the close button');
+    expect(responses(brain, 'closed') === 1, 'the diary does not say the bubble was closed');
+
+    // A reply to something you did (not a reminder) that fades away, or is closed, is nobody's business.
+    brain.say({text: 'Xong rồi! 🎉', seconds: 1});
+    await ctx.wait(400);
+    expect(view.visible, 'the reply is not on screen');
+    await ctx.wait(1500);
+    expect(!view.visible && brain.bubble === null, 'the reply did not fade after its second');
+    expect(responses(brain, 'ignored') === 0, 'a reply that faded was reported as ignored');
+    expect(responses(brain, 'closed') === 1, 'the diary has more than one close');
+}));
+
+// A 150-character Vietnamese title with emoji, a word with no break in it, and buttons with long titles: everything
+// wraps inside the bubble and nothing is cut. Nobody taps anything: the bubble fades after its 3 seconds and the
+// diary says it was ignored.
+registerScene('long-title', ctx => withPet(ctx, Mood.normal, async pet => {
+    const {brain, bubble: view} = ctx.app;
+    await untilOnGround(ctx, pet);
+    const title = 'Soạn bản báo cáo tổng kết quý ba cho phòng kỹ thuật, gồm doanh thu, chi phí và kế hoạch tuyển dụng, ' +
+        'rồi gửi chị Lan duyệt trước 17 giờ chiều nay 📊🚀✨';
+    expect(title.length === 150, `the title has ${title.length} characters`);
+    const word = 'Khôngcókhoảngtrắngnàoởđâyhếtmàdàiquámứcmộtdòng👨‍👩‍👧‍👦';
+    // A bubble with a button is up; the urgent one replaces it (and nobody is told about the first).
+    brain.say({text: 'Xin chào 👋', seconds: 60, actions: [{title: 'Ok'}]});
+    await ctx.wait(300);
+    const first = view.bubble?.id;
+    expect(view.visible && view.actionButtons.length === 1, 'the first bubble is not on screen');
+    brain.say({
+        text: `“${title}” bị dời 6 ngày rồi 😑\n${word}`,
+        seconds: 3,
+        urgent: true,
+        actions: [
+            {title: '▶︎ Tập trung 25\'', primary: true},
+            {title: 'Kéo 12 việc quá hạn vào hôm nay'},
+            {title: 'Để sau'},
+        ],
+    }, {why: 'the long-title scene'});
+    const shownAt = GLib.get_monotonic_time();
+    const sinceShown = () => (GLib.get_monotonic_time() - shownAt) / 1e6;
+    await ctx.wait(600);
+    expect(view.visible && view.bubble.id !== first && view.bubble.id === brain.bubble?.id,
+        'the urgent bubble did not replace the first one');
+    expect(view.actionButtons.length === 3, `the bubble has ${view.actionButtons.length} buttons, not 3`);
+    expectPlaced(view, pet);
+    expectTextWhole(view, 5);
+    const content = view.textActor.get_transformed_size()[0];
+    for (const button of view.actionButtons) {
+        const [x] = button.get_transformed_position();
+        const [width] = button.get_transformed_size();
+        const [textX] = view.textActor.get_transformed_position();
+        expect(x + width <= textX + content + 1, `a button sticks out of the bubble: ${x} + ${width}`);
+    }
+    await ctx.shot('long-title');
+
+    // Up for 3 s: still there at 2.5 s, gone by 3.6 s (a 0.2 s fade), well before the brain's own drop at 5 s.
+    await ctx.wait(Math.max(0, 2500 - sinceShown() * 1000));
+    expect(sinceShown() < 2.9, `the scene was too slow to look at the bubble before its time (${sinceShown()} s)`);
+    expect(view.visible && brain.bubble !== null, 'the bubble went before its time');
+    await ctx.wait(Math.max(0, 3600 - sinceShown() * 1000));
+    console.log(`TODOPET bubble faded at ${sinceShown().toFixed(1)} s: visible=${view.visible} ` +
+        `brain=${brain.bubble?.id ?? null}`);
+    expect(!view.visible && brain.bubble === null, 'the bubble did not go after its seconds');
+    expect(responses(brain, 'ignored') === 1, 'the diary does not say the bubble was ignored');
+    expect(!pet.paused, 'the pet still stands after the bubble went');
+}));

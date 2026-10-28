@@ -1,8 +1,8 @@
 // Composition root: owns every service and UI object, and undoes all of it in stop().
 // extension.js creates one App per enable() and calls stop() from disable().
 //
-// start() runs the Shell services, the files, the brain (ticked every second) and the pet. The pet is shown
-// unless the screen is locked or `hidden-until` is still ahead.
+// start() runs the Shell services, the files, the brain (ticked every second), the pet and its speech bubble. The pet
+// is shown unless the screen is locked or `hidden-until` is still ahead.
 //
 // Environment variables set only by tools/nested.sh (the isolated nested shell):
 //   TODOPET_NESTED=1      this is the nested dev shell; the only place dev scenes may run. Chimes and speech are
@@ -26,6 +26,8 @@ import {playChime} from '../services/sound.js';
 import {speak} from '../services/speech.js';
 import {DiaryFiles, JsonStore, dataDir} from '../services/store.js';
 import {TodoistClient} from '../services/todoist.js';
+import {BubbleView} from './bubble.js';
+import {shouldShowBubble} from './bubbleLogic.js';
 import {PetActor} from './pet.js';
 
 // The keyring's interface, kept in memory: for the nested shell, which must never read the user's real secrets.
@@ -69,8 +71,8 @@ export class App {
         this.files = null;
         this.brain = null;
         this.pet = null;
-        // Filled in by later tasks.
-        this.bubble = null;
+        this.bubble = null; // BubbleView
+        // Filled in by later tasks. The board must have `isShown`: the pet stands still while it is open.
         this.board = null;
         this.antics = null;
         this.indicator = null;
@@ -125,8 +127,10 @@ export class App {
         this._connectBrain();
 
         this.pet = new PetActor(this);
+        this.bubble = new BubbleView(this);
         this._petIds.push(
             this.pet.on('clicked', () => this._petClicked()),
+            this.pet.on('moved', frame => this.bubble?.follow(frame)),
             this.pet.on('antic-ended', () => this.brain?.endAntic()));
 
         this._sessionIds.push(
@@ -173,6 +177,8 @@ export class App {
         for (const id of this._brainIds)
             this.brain?.off(id);
         this._brainIds = [];
+        this.bubble?.destroy();
+        this.bubble = null;
         this.brain?.stop();
         this.brain = null;
 
@@ -254,8 +260,37 @@ export class App {
             // A new mood or a celebration shows at once (between changes the pet repaints on its own).
             brain.on('changed', () => this.pet?.poke()),
             brain.on('celebrate', () => this.pet?.poke()),
+            brain.on('bubble', bubble => this._onBubble(bubble)),
             brain.on('antic', antic => this._performAntic(antic)),
             brain.on('antic-end', () => this.pet?.endAntic()));
+    }
+
+    // Swift: AppDelegate.showBubble. The brain holds one bubble; the view shows it above the pet and gives it back
+    // (dismissBubble) when its time is up. Without the pet in sight, and while the board is open (an urgent bubble
+    // still comes through), a new bubble is dropped at once.
+    _onBubble(bubble) {
+        const brain = this.brain;
+        if (!brain || !this.bubble)
+            return;
+        if (bubble === null) {
+            this.bubble.hide();
+            this.updatePause();
+            return;
+        }
+        const petVisible = Boolean(this.pet?.visible);
+        if (!shouldShowBubble({bubble, petVisible, boardOpen: Boolean(this.board?.isShown)})) {
+            brain.dismissBubble(bubble.id);
+            return;
+        }
+        this.bubble.show(bubble, this.pet.frame, brain.mood);
+        this.updatePause();
+    }
+
+    // The pet stands still while a bubble or the board is up (Swift: updatePause). The board calls this when it opens
+    // or closes.
+    updatePause() {
+        if (this.pet)
+            this.pet.paused = Boolean(this.bubble?.visible) || Boolean(this.board?.isShown);
     }
 
     // The brain's mischief, played by the pet (Swift: AppDelegate.perform). Grumbling needs no movement.
@@ -286,10 +321,15 @@ export class App {
         if (!this.pet || !this.prefs)
             return;
         const hidden = Boolean(this.session?.locked) || this.prefs.hiddenUntil > Date.now();
-        if (hidden)
+        if (hidden) {
+            // A bubble has no business on screen without the pet it points at.
+            const bubble = this.bubble?.bubble;
+            if (bubble)
+                this.brain?.dismissBubble(bubble.id);
             this.pet.hide();
-        else
+        } else {
             this.pet.show();
+        }
     }
 
     // Runs `fn`; a failure is logged the first time it happens for `what`, and its repeats stay quiet.

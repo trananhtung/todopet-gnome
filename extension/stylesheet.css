@@ -14,3 +14,146 @@
     padding: 1px 5px;
     font-weight: normal;
 }
+
+/* The speech bubble (Bubble.swift: BubbleView, PillButtonStyle). The shape, its shadow and its outline are drawn by
+   ui/bubble.js; this is the column inside it. The padding is Swift's .padding(10) for the shadow plus
+   .padding(.horizontal, 14), .padding(.top, 10) and .padding(.bottom, 12 + 10) (the tail is 10 px tall). The width
+   (270 + 2 × 10) is set in the code. Light is the default; the root gets .todopet-bubble-dark in a dark session. */
+.todopet-bubble {
+    color: #242424;
+}
+
+.todopet-bubble-content {
+    padding: 20px 24px 32px 24px;
+    spacing: 8px;
+}
+
+.todopet-bubble-header {
+    spacing: 4px;
+}
+
+.todopet-bubble-name {
+    font-size: 11px;
+    font-weight: bold;
+    color: rgba(0, 0, 0, 0.5);
+}
+
+.todopet-bubble-emoji {
+    font-size: 11px;
+}
+
+.todopet-bubble-close {
+    padding: 4px;
+    border-radius: 999px;
+    color: rgba(0, 0, 0, 0.5);
+}
+
+.todopet-bubble-close:hover,
+.todopet-bubble-close:focus {
+    background-color: rgba(0, 0, 0, 0.08);
+}
+
+.todopet-bubble-close:active {
+    background-color: rgba(0, 0, 0, 0.16);
+}
+
+.todopet-bubble-close-icon {
+    icon-size: 12px;
+}
+
+.todopet-bubble-text {
+    font-size: 13px;
+
+}
+
+.todopet-bubble-actions {
+    spacing: 6px;
+}
+
+.todopet-bubble-row {
+    spacing: 6px;
+}
+
+.todopet-bubble-pill {
+    padding: 5px 10px;
+    border-radius: 999px;
+    font-size: 12px;
+    font-weight: bold;
+    color: #242424;
+    background-color: rgba(0, 0, 0, 0.08);
+}
+
+.todopet-bubble-pill:hover,
+.todopet-bubble-pill:focus {
+    background-color: rgba(0, 0, 0, 0.14);
+}
+
+.todopet-bubble-pill:active {
+    background-color: rgba(0, 0, 0, 0.22);
+}
+
+.todopet-bubble-pill-primary,
+.todopet-bubble-pill-primary:hover,
+.todopet-bubble-pill-primary:focus,
+.todopet-bubble-pill-primary:active {
+    color: -st-accent-fg-color;
+    background-color: -st-accent-color;
+}
+
+.todopet-bubble-pill-primary:hover,
+.todopet-bubble-pill-primary:focus {
+    background-color: st-lighten(-st-accent-color, 5%);
+}
+
+.todopet-bubble-pill-primary:active {
+    background-color: st-darken(-st-accent-color, 10%);
+}
+
+.todopet-bubble-dark {
+    color: #f2f2f2;
+}
+
+.todopet-bubble-dark .todopet-bubble-name,
+.todopet-bubble-dark .todopet-bubble-close {
+    color: rgba(255, 255, 255, 0.6);
+}
+
+.todopet-bubble-dark .todopet-bubble-close:hover,
+.todopet-bubble-dark .todopet-bubble-close:focus {
+    background-color: rgba(255, 255, 255, 0.1);
+}
+
+.todopet-bubble-dark .todopet-bubble-close:active {
+    background-color: rgba(255, 255, 255, 0.2);
+}
+
+.todopet-bubble-dark .todopet-bubble-pill {
+    color: #f2f2f2;
+    background-color: rgba(255, 255, 255, 0.12);
+}
+
+.todopet-bubble-dark .todopet-bubble-pill:hover,
+.todopet-bubble-dark .todopet-bubble-pill:focus {
+    background-color: rgba(255, 255, 255, 0.2);
+}
+
+.todopet-bubble-dark .todopet-bubble-pill:active {
+    background-color: rgba(255, 255, 255, 0.28);
+}
+
+.todopet-bubble-dark .todopet-bubble-pill-primary,
+.todopet-bubble-dark .todopet-bubble-pill-primary:hover,
+.todopet-bubble-dark .todopet-bubble-pill-primary:focus,
+.todopet-bubble-dark .todopet-bubble-pill-primary:active {
+    color: -st-accent-fg-color;
+    background-color: -st-accent-color;
+}
+
+.todopet-bubble-dark .todopet-bubble-pill-primary:hover,
+.todopet-bubble-dark .todopet-bubble-pill-primary:focus {
+    background-color: st-lighten(-st-accent-color, 5%);
+}
+
+.todopet-bubble-dark .todopet-bubble-pill-primary:active {
+    background-color: st-darken(-st-accent-color, 10%);
+}
