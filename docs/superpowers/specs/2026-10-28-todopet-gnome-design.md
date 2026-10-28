@@ -39,7 +39,7 @@ describes what changes; anything it does not mention behaves exactly as in the S
 | Active tab URL via AppleScript | **Window-title matching** (see below). URLs are no longer available. |
 | `secondsSinceLastEventType(.keyDown)` | **Typing heuristic** (see below) |
 | Idle time | `global.backend.get_core_idle_monitor().get_idletime()` (in-process `Meta.IdleMonitor`, no D-Bus round trip) |
-| EventKit (Calendar) | `org.gnome.Shell.CalendarServer` D-Bus (the same source as the top bar clock). Calendars added in *Settings › Online Accounts* (Google, Microsoft 365) or in GNOME Calendar/Evolution show up. Join links come from the event's location/description (Meet, Zoom, Teams URLs). |
+| EventKit (Calendar) | `org.gnome.Shell.CalendarServer` D-Bus (the same source as the top bar clock). Calendars added in *Settings › Online Accounts* (Google, Microsoft 365) or in GNOME Calendar/Evolution show up. That server only sends title and times, so it covers meeting reminders, quiet time, free time and time blocks. **Join links** need the event's location/description/URL: when the optional package `gir1.2-ecal-2.0` is installed, the extension reads today's events through Evolution Data Server (`gi://ECal`, async calls only) instead and finds Meet, Zoom and Teams links there. Without it the **Join** button is hidden and the Settings page says which package adds it. |
 | Keychain | libsecret (`Secret` GI), GNOME Keyring. Items: Todoist token, Anthropic API key. |
 | Menu bar item (`😊 2/3`, `🍅 18:42`) + menu | `PanelMenu.Button` in the top bar with the same label and the same quick menu (add task, focus, hide 1 h, quiet 1 h, diary, settings) |
 | Global hotkey ⌃⌥T | `Main.wm.addKeybinding`. Default **Ctrl+Super+T** because Ubuntu uses Ctrl+Alt+T for the Terminal. Changeable in Settings. |
@@ -108,7 +108,7 @@ todopet@trananhtung.github.io/
     demo.js              DemoService
     claude.js            Messages API split-into-steps, same request as ClaudeClient.swift
     secrets.js           libsecret store/lookup/clear
-    calendar.js          CalendarServer D-Bus client → CalEvent list
+    calendar.js          CalEvent list from ECal when gir1.2-ecal-2.0 is installed, else CalendarServer D-Bus
     idle.js              idle time from Meta.IdleMonitor, plus the typing sampler
     focusWatch.js        focused app/title tracking
     speech.js, sound.js
@@ -152,7 +152,7 @@ All keys from `Prefs.swift` with the same defaults:
 `first-launch`.
 
 New keys: `board-hotkey` (default `['<Control><Super>t']`), `hidden-until`, `quiet-until`, `demo-mode`,
-`dev-screenshot-dir` (developer only, see Testing).
+`dev-screenshot-dir` and `dev-scenes` (developer only, see Testing).
 
 ## Testing
 
@@ -161,9 +161,12 @@ New keys: `board-hotkey` (default `['<Control><Super>t']`), `hidden-until`, `qui
    CalendarServer payloads. Runs on any machine with `gjs`, including CI.
 2. **Art snapshots** (`make snapshot` → `out/*.png`): mood grid, life grid (stages, hungry, dirty, accessories,
    celebrations, golden), focus chip, compared by eye with `docs/moods.png` and `docs/life.png` from the Swift repo.
-3. **Nested GNOME Shell** (no sudo): `dbus-run-session -- gnome-shell --headless --virtual-monitor 1600x900` with the
-   extension installed and `demo-mode` on. When `dev-screenshot-dir` is set, the extension saves stage screenshots
+3. **Nested GNOME Shell** (no sudo): `dbus-run-session -- gnome-shell --headless --virtual-monitor 1600x900` with
+   its own `XDG_DATA_HOME`, `XDG_CONFIG_HOME`, `XDG_CACHE_HOME` and `XDG_STATE_HOME` under `build/nested/`, so it never
+   touches the real session's extensions or dconf settings. The extension is installed there with `demo-mode` on.
+   When `dev-screenshot-dir` and `dev-scenes` are set, the extension plays those scenes and saves stage screenshots
    (pet walking, bubble, board, split view, wardrobe, diary, parade, table flip) with `Shell.Screenshot`.
+   Verified on this machine on 2026-10-28 with a throwaway extension.
    The run passes when every scene renders and the journal has no extension errors.
    Optional: with `mutter-dev-bin` installed, `gnome-shell --devkit` shows the same thing live in a window.
 4. **Real session** (the author): `make install`, log out and back in, `gnome-extensions enable todopet@trananhtung.github.io`.
