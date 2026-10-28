@@ -1,7 +1,7 @@
 import {atHour, dayKey, parseDate} from '../extension/core/dates.js';
 import {Task} from '../extension/core/models.js';
 import {
-    busy, currentEvent, eventFromComp, eventsFromServer, freeMinutes, freeSlots, hoursText, joinURL, nextEvent,
+    busy, currentEvent, eventFromComp, eventsFromServer, freeMinutes, freeSlots, hoursText, isWebURL, joinURL, nextEvent,
     suggest, targetFor,
 } from '../extension/core/calendarMath.js';
 import {StuckTracker, stuckDays} from '../extension/core/stuck.js';
@@ -183,6 +183,17 @@ export default async function (t) {
     t.eq(joinURL(null, ['x', 'https://whereby.com/a https://zoom.us/b']), 'https://whereby.com/a', 'the first meeting link wins');
     t.eq(joinURL(null, ['room: https://zoom.us/j/1?pwd=a.b!']), 'https://zoom.us/j/1?pwd=a.b!',
         'trailing punctuation stays on the link, as in the Swift app');
+    // Only web links: an invitation's URL must not open whatever handles another scheme (the final review).
+    t.eq(joinURL('javascript:alert(1)', []), null, 'a javascript: event URL is no Join link');
+    t.eq(joinURL('file:///etc/passwd', ['nothing here']), null, 'a file: event URL is no Join link');
+    t.eq(joinURL('smb://server/share/x', []), null, 'an smb: event URL is no Join link');
+    t.eq(joinURL('javascript://zoom.us/%0Aalert(1)', []), null, 'not even one whose "host" looks like a meeting host');
+    t.eq(joinURL('smb://server/share', ['Join https://meet.google.com/abc']), 'https://meet.google.com/abc',
+        'a meeting link in the notes still wins over a URL that is not a web link');
+    t.eq(joinURL('HTTPS://Example.com/e', []), 'HTTPS://Example.com/e', 'the scheme is compared in any case');
+    t.eq([isWebURL('https://zoom.us/j/1'), isWebURL('http://x.example'), isWebURL('https://'), isWebURL('javascript:alert(1)'),
+        isWebURL('file:///tmp'), isWebURL('smb://host/share'), isWebURL(' https://zoom.us'), isWebURL(null)],
+    [true, true, false, false, false, false, false, false], 'isWebURL: http and https with a host, nothing else');
 
     // --- Events from the calendar server ---
     const ev = eventsFromServer([['b', 'Sync', 1792908000, 1792909800, {}], ['a', 'Standup', 1792900000, 1792901800, {}],
@@ -233,6 +244,8 @@ export default async function (t) {
         description: 'https://zoom.us/j/5'}).joinURL, 'https://teams.microsoft.com/l/x', 'the location is searched before the notes');
     t.eq(eventFromComp({uid: 'u6', summary: 'V', start: when, end: until, url: 'https://example.com/e'}).joinURL,
         'https://example.com/e', 'a plain event URL is kept as the link, as in the Swift app');
+    t.eq(eventFromComp({uid: 'u8', summary: 'V', start: when, end: until, url: 'file:///home/me/x.desktop'}).joinURL,
+        null, 'an event URL that is not a web link gives no Join link');
     t.eq(eventFromComp({uid: 'u7', summary: 'V', start: 'noon', end: until}), null, 'a component without a real start is dropped');
 
     // --- Postponed tasks (DevTools.swift "Postponed tasks") ---

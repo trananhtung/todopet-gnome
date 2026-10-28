@@ -1313,7 +1313,7 @@ registerScene('diary', ctx => withBoard(ctx, Mood.angry, async (board, pet, poin
     diary._files = files;
     const opened = [];
     try {
-        await withStub(app, 'openURL', url => opened.push(url), async () => {
+        await withStub(app, 'openFolder', url => opened.push(url), async () => {
             board.open();
             await ctx.wait(800);
             await brain.settle();
@@ -1867,6 +1867,24 @@ registerScene('locked', ctx => withPet(ctx, Mood.angry, async pet => {
     brain.endAntic();
     brain.dismissBubble();
 }));
+
+// App.openURL opens only http and https links: a Join link comes from calendar data, which anyone's invitation can
+// fill. javascript:, file: and smb: links are refused (logged once), from the board's path and the brain's. Nothing is
+// really launched here: Gio's launcher is stubbed.
+registerScene('open-links', async ctx => {
+    const {app} = ctx;
+    const launched = [];
+    const join = 'https://meet.google.com/abc-defg-hij';
+    await withStub(Gio.AppInfo, 'launch_default_for_uri_async', uri => launched.push(uri), async () => {
+        for (const url of ['javascript:alert(1)', 'file:///etc/passwd', 'smb://server/share', join])
+            app.openURL(url);
+        app.brain.env.openURL('smb://server/other');
+        app.brain.env.openURL(join);
+        await ctx.wait(100);
+    });
+    console.log(`TODOPET open-links launched ${launched.join(' ')}`);
+    expect(launched.length === 2 && launched.every(uri => uri === join), `the links launched: ${launched.join(' ')}`);
+});
 
 // The `dev-trigger` setting plays a command and goes back to ''; the settings window's `prefs:` values stay.
 registerScene('dev-trigger', ctx => withPet(ctx, Mood.normal, async pet => {

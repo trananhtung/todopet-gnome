@@ -391,7 +391,7 @@ export class DiaryView {
         const uri = folderURI(this._brain?.diary?.folder);
         if (!uri)
             return;
-        this._app.openURL?.(uri);
+        this._app.openFolder?.(uri);
         if (this._closeSource === 0) {
             this._closeSource = GLib.idle_add(GLib.PRIORITY_DEFAULT_IDLE, () => {
                 this._closeSource = 0;

@@ -23,11 +23,19 @@ function hostOf(text) {
 
 const isMeetingHost = host => host !== null && MEETING_HOSTS.some(meetingHost => host.endsWith(meetingHost));
 
+// True for an absolute http:// or https:// URL with a host: the only links TodoPet opens in the default app (a
+// calendar event can come from anyone's invitation, so its URL must not start whatever handles another scheme).
+export function isWebURL(text) {
+    return typeof text === 'string' && /^https?:\/\//i.test(text) && hostOf(text) !== null;
+}
+
 // Finds a video-call link in the event URL, then in the given texts (location, notes). Like the Swift app,
-// an event URL that is not a meeting link is still returned when the texts hold no meeting link.
+// an event URL that is not a meeting link is still returned when the texts hold no meeting link, but only a web
+// (http or https) one: any other URL is no Join link.
 export function joinURL(url, texts = []) {
-    if (typeof url === 'string' && isMeetingHost(hostOf(url)))
-        return url;
+    const web = isWebURL(url) ? url : null;
+    if (web !== null && isMeetingHost(hostOf(web)))
+        return web;
     for (const text of texts ?? []) {
         if (typeof text !== 'string')
             continue;
@@ -36,7 +44,7 @@ export function joinURL(url, texts = []) {
                 return link;
         }
     }
-    return url || null;
+    return web;
 }
 
 // Busy intervals clipped to [from, to], sorted by start and merged when they overlap or touch.

@@ -21,6 +21,7 @@ import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
 import {clearArtCaches} from '../art/petArt.js';
 import {Brain} from '../brain.js';
+import {isWebURL} from '../core/calendarMath.js';
 import {setLang} from '../core/l10n.js';
 import {Prefs} from '../core/prefs.js';
 import {CalendarSource} from '../services/calendar.js';
@@ -339,13 +340,32 @@ export class App {
                     playChime(chime, this.prefs.soundMode);
             },
             ...secrets,
-            openURL: launchURL,
+            openURL: url => this.openURL(url),
         };
     }
 
-    // Opens a link in the default browser (the board's Todoist and Join links), without waiting.
+    // Opens a link in the default browser (the board's Todoist and Join links, the brain's Join button), without
+    // waiting. Only http and https: a Join link comes from calendar data, which anyone's invitation can fill. Another
+    // scheme is refused, and logged once.
     openURL(url) {
+        if (!isWebURL(url)) {
+            if (!this._loggedFailures.has('openURL')) {
+                this._loggedFailures.add('openURL');
+                const scheme = typeof url === 'string' ? GLib.Uri.peek_scheme(url) : null;
+                console.warn(`TodoPet: not opening a link that is not http or https (${scheme ?? 'no scheme'})`);
+            }
+            return;
+        }
         launchURL(url);
+    }
+
+    // Opens one of our own folders (the diary's, a file:// URI) in the file manager, without waiting.
+    openFolder(uri) {
+        if (GLib.Uri.peek_scheme(uri) !== 'file') {
+            console.warn('TodoPet: not opening a folder that is not a file:// URI');
+            return;
+        }
+        launchURL(uri);
     }
 
     // What the brain's bubbles and rules open (Swift: AppDelegate's brain.openBoard, openBreakdown, openSettings).
