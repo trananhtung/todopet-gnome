@@ -117,7 +117,7 @@ t.eq(got, 2, 'emitter on/off');
 ```js
 t.eq(shortText('abc', 3), 'abc', 'short text keeps text that fits');
 t.eq(shortText('👨‍👩‍👧‍👦👨‍👩‍👧‍👦👨‍👩‍👧‍👦', 2), '👨‍👩‍👧‍👦…', 'short text never splits a grapheme');
-t.eq(shortText('Tiếng Việt có dấu', 5), 'Tiến…', 'combining marks stay with their letter');
+t.eq(shortText('Tie\u0302\u0301ng Việt có dấu', 5), 'Tie\u0302\u0301n…', 'combining marks stay with their letter');
 t.eq(nextDayKey('2026-12-31'), '2027-01-01', 'next day across the year');
 ```
 
