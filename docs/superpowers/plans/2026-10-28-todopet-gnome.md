@@ -6,7 +6,7 @@
 
 **Architecture:** Pure logic lives in `extension/core/` (plain ES modules, at most GLib/Gio) and is unit-tested with `gjs -m`. Services wrap Todoist, Claude, libsecret, the calendar and Shell signals. `brain.js` is driven by `tick(now)` with injected services and clock, so it is tested without GNOME Shell. UI is St/Clutter in top chrome, verified by scene screenshots taken inside an isolated headless nested GNOME Shell.
 
-**Tech Stack:** GJS 1.88 (ES modules), GNOME Shell 50 extension API, St/Clutter, Cairo + PangoCairo, libsoup 3, libsecret, optional ECal 2.0, libadwaita (prefs), ESLint 9 (dev only), GitHub Actions.
+**Tech Stack:** GJS 1.88 (ES modules), GNOME Shell 50 extension API, St/Clutter, Cairo + PangoCairo, libsoup 3, libsecret, optional ECal 2.0, libadwaita (prefs), ESLint 10 (dev only, needs Node ≥ 20.19; CI sets up Node 24), GitHub Actions.
 
 **Spec:** `docs/superpowers/specs/2026-10-28-todopet-gnome-design.md`
 
