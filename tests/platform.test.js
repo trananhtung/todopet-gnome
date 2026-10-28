@@ -1,0 +1,286 @@
+// Tests for the pure parts of the Shell services (services/speech.js, sound.js, idle.js, focusWatch.js and
+// calendar.js). Nothing here touches D-Bus, the sound player or `global`: the Shell-only parts get fakes, and
+// CalendarSource is only run in demo mode or with the calendar turned off (both make no D-Bus call).
+import GLib from 'gi://GLib';
+
+import {Prefs} from '../extension/core/prefs.js';
+import {CalendarSource, ServerEvents, dayBounds, widenRange} from '../extension/services/calendar.js';
+import {BROWSER_APP_IDS, FocusWatch, isBrowserWindow} from '../extension/services/focusWatch.js';
+import {IdleWatch} from '../extension/services/idle.js';
+import {CHIME_SOUNDS, playChime, shouldPlay} from '../extension/services/sound.js';
+import {speechArgs} from '../extension/services/speech.js';
+
+const sourceExists = id => GLib.MainContext.default().find_source_by_id(id) !== null;
+
+function speechAndSound(t) {
+    t.eq(speechArgs('Xin chào', 'vi'), ['spd-say', '-l', 'vi', '--', 'Xin chào'], 'speech args');
+    t.eq(speechArgs('-r 100 hi', 'en'), ['spd-say', '-l', 'en', '--', '-r 100 hi'],
+        'speech text that looks like an option stays after --');
+
+    t.check(!shouldPlay('chatter', 'important') && shouldPlay('important', 'important') &&
+        !shouldPlay('celebrate', 'off') && shouldPlay('grumble', 'all'), 'sound modes');
+    // The whole gate of Brain.play(): off is silent, important skips chatter and grumble, all plays everything.
+    const chimes = ['chatter', 'important', 'celebrate', 'big', 'grumble'];
+    t.eq(Object.fromEntries(['off', 'important', 'all'].map(mode => [mode, chimes.filter(c => shouldPlay(c, mode))])), {
+        off: [],
+        important: ['important', 'celebrate', 'big'],
+        all: ['chatter', 'important', 'celebrate', 'big', 'grumble'],
+    }, 'sound gate matches Brain.play for every mode');
+    t.check(!shouldPlay('nonsense', 'all') && !shouldPlay('important', 'loud'), 'unknown chime or mode is silent');
+    t.eq(CHIME_SOUNDS, {chatter: 'message', important: 'bell', celebrate: 'complete', big: 'complete', grumble: 'dialog-warning'},
+        'theme sound per chime');
+    t.check(Object.isFrozen(CHIME_SOUNDS), 'CHIME_SOUNDS is frozen');
+    // `global` does not exist in plain gjs, so these would throw if the gate let them reach the sound player.
+    t.eq([playChime('chatter', 'important'), playChime('big', 'off')], [false, false], 'a gated chime never touches the player');
+}
+
+function idleWatch(t) {
+    let now = 0;
+    let idle = 5000;
+    let pointer = [10, 10, 0];
+    const w = new IdleWatch({idleMs: () => idle, pointer: () => pointer, nowMs: () => now});
+    t.eq([w.idleSeconds(), w.secondsSinceKey()], [0, 1e9], 'idle watch before the first sample');
+
+    w._sample();
+    t.eq([w.idleSeconds(), w.secondsSinceKey()], [5, 1e9], 'first sample: idle time, no key press yet');
+    now = 1000;
+    idle = 200;
+    w._sample();
+    now = 3500;
+    idle = 2500;
+    w._sample();
+    t.eq([w.idleSeconds(), w.secondsSinceKey()], [2.5, 2.5], 'input without pointer movement counts as a key press');
+    now = 4500;
+    idle = 100;
+    pointer = [50, 60, 0];
+    w._sample();
+    t.eq(w.secondsSinceKey(), 3.5, 'input with pointer movement is not a key press');
+
+    w.start();
+    const first = w._sourceId;
+    t.check(first !== 0 && sourceExists(first), 'start() adds the 1 s sampling source');
+    w.start();
+    t.eq(w._sourceId, first, 'start() twice keeps one source');
+    w.stop();
+    t.check(w._sourceId === 0 && !sourceExists(first), 'stop() removes the sampling source');
+    w.stop();
+    w.start();
+    const second = w._sourceId;
+    t.check(second !== 0 && sourceExists(second), 'start() after stop() samples again');
+    w.stop();
+    t.check(!sourceExists(second), 'stopped again');
+}
+
+// Minimal stand-ins for Meta.Display, Meta.Window, Shell.WindowTracker and Shell.App.
+class FakeObject {
+    constructor() {
+        this._handlers = new Map();
+        this._next = 1;
+    }
+
+    connect(name, cb) {
+        const id = this._next++;
+        this._handlers.set(id, {name, cb});
+        return id;
+    }
+
+    disconnect(id) {
+        if (!this._handlers.delete(id))
+            throw new Error(`disconnect of unknown id ${id}`);
+    }
+
+    fire(name) {
+        for (const {name: n, cb} of [...this._handlers.values()]) {
+            if (n === name)
+                cb(this);
+        }
+    }
+
+    get connections() {
+        return this._handlers.size;
+    }
+}
+
+class FakeWindow extends FakeObject {
+    constructor(wmClass, title) {
+        super();
+        this.wmClass = wmClass;
+        this.title = title;
+    }
+
+    get_wm_class() {
+        return this.wmClass;
+    }
+
+    get_title() {
+        return this.title;
+    }
+}
+
+const fakeTracker = apps => ({
+    get_window_app: win => {
+        const app = apps.get(win);
+        return app ? {get_name: () => app[0], get_id: () => app[1]} : null;
+    },
+});
+
+function focusWatch(t) {
+    t.check(isBrowserWindow('Firefox', '') && isBrowserWindow('google-chrome', null), 'browser by window class');
+    t.check(isBrowserWindow('chrome-abc-Default', 'com.google.Chrome.desktop') &&
+        isBrowserWindow('', 'org.mozilla.firefox'), 'browser by app id, with or without .desktop');
+    t.check(!isBrowserWindow('gnome-terminal-server', 'org.gnome.Terminal.desktop') && !isBrowserWindow(null, undefined),
+        'a terminal is not a browser');
+    t.eq(BROWSER_APP_IDS, ['com.google.Chrome', 'com.brave.Browser', 'com.microsoft.Edge', 'org.chromium.Chromium',
+        'com.vivaldi.Vivaldi', 'com.opera.Opera', 'org.mozilla.firefox'], 'browser app ids (ruling R9)');
+
+    const display = new FakeObject();
+    const code = new FakeWindow('Code', 'main.js - todopet');
+    const web = new FakeWindow('chrome-x', 'Watch later - YouTube - Google Chrome');
+    const apps = new Map([[code, ['Visual Studio Code', 'code.desktop']], [web, ['Google Chrome', 'com.google.Chrome.desktop']]]);
+    let clock = 1000;
+    const watch = new FocusWatch({display, tracker: fakeTracker(apps), now: () => new Date(clock)});
+    const changes = [];
+    watch.on('changed', current => changes.push(current));
+
+    display.focus_window = code;
+    watch.start();
+    t.eq(watch.current, {appName: 'Visual Studio Code', wmClass: 'Code', title: 'main.js - todopet', isBrowser: false,
+        since: new Date(1000)}, 'start() reads the focused window');
+    t.eq(watch.lastSwitch, new Date(1000), 'lastSwitch starts at start()');
+
+    clock = 2000;
+    code.title = 'calendar.js - todopet';
+    code.fire('notify::title');
+    t.eq([watch.current.title, watch.current.since, watch.lastSwitch, changes.length],
+        ['calendar.js - todopet', new Date(1000), new Date(1000), 1], 'a title change keeps since and emits changed');
+
+    clock = 3000;
+    display.focus_window = web;
+    display.fire('notify::focus-window');
+    t.eq([watch.current.appName, watch.current.isBrowser, watch.current.since, watch.lastSwitch, changes.length],
+        ['Google Chrome', true, new Date(3000), new Date(3000), 2], 'moving focus to another window is a switch');
+    t.eq(code.connections, 0, 'the previous window is no longer watched');
+
+    clock = 4000;
+    display.focus_window = null;
+    display.fire('notify::focus-window');
+    t.eq([watch.current, watch.lastSwitch, changes.length, changes.at(-1)], [null, new Date(3000), 3, null],
+        'no focused window: current is null, not a switch');
+    clock = 5000;
+    display.focus_window = web;
+    display.fire('notify::focus-window');
+    t.eq([watch.current.since, watch.lastSwitch], [new Date(3000), new Date(3000)],
+        'focus back on the same window keeps since');
+    display.fire('notify::focus-window');
+    t.eq(changes.length, 4, 'a notify without a change emits nothing');
+
+    watch.stop();
+    t.eq([display.connections, web.connections, code.connections, watch.current], [0, 0, 0, null],
+        'stop() disconnects the display and the window');
+    watch.stop();
+    clock = 6000;
+    watch.start();
+    t.eq([watch.current.wmClass, watch.current.since, display.connections, web.connections],
+        ['chrome-x', new Date(6000), 1, 2], 'start() after stop() watches again');
+    watch.stop();
+    t.eq([display.connections, web.connections], [0, 0], 'stopped again');
+
+    const noTracker = new FocusWatch({display, now: () => new Date(clock)});
+    noTracker.start();
+    t.eq(noTracker.current.appName, 'chrome-x', 'without an app the name falls back to the window class');
+    noTracker.stop();
+}
+
+const sec = (y, m, d, h, min = 0) => new Date(y, m - 1, d, h, min).getTime() / 1000;
+
+function serverEvents(t) {
+    const day = new Date(2026, 9, 28, 15);
+    const [start, end] = dayBounds(day);
+    t.eq([start, end], [new Date(2026, 9, 28), new Date(2026, 9, 29)], 'dayBounds: local midnight to midnight');
+
+    const cache = new ServerEvents();
+    t.check(cache.add([
+        ['src\nsolo\n', 'Standup', sec(2026, 10, 28, 9), sec(2026, 10, 28, 9, 15), {}],
+        ['src\nrec\n20261028T080000', 'Daily', sec(2026, 10, 28, 8), sec(2026, 10, 28, 8, 30), {}],
+        ['src\nrec\n20261027T080000', 'Daily', sec(2026, 10, 27, 8), sec(2026, 10, 27, 8, 30), {}],
+        ['src\nnight\n', 'Deploy', sec(2026, 10, 27, 23), sec(2026, 10, 28, 1), {}],
+        ['src\nholiday\n', 'Holiday', sec(2026, 10, 28, 0), sec(2026, 10, 29, 0), {}],
+    ]), 'add() reports a change');
+    t.eq(cache.forDay(day).map(e => e.title), ['Deploy', 'Daily', 'Standup'],
+        'forDay: overlapping events of that day, sorted by start, all-day dropped');
+    t.eq(cache.forDay(day)[1], {id: 'src\nrec\n20261028T080000', title: 'Daily', start: new Date(2026, 9, 28, 8),
+        end: new Date(2026, 9, 28, 8, 30), joinURL: null}, 'a server event has no join link');
+
+    // An update of a recurring event replaces all of its instances, as in the shell's DBusEventSource.
+    cache.add([['src\nrec\n20261028T100000', 'Daily (moved)', sec(2026, 10, 28, 10), sec(2026, 10, 28, 10, 30), {}]]);
+    t.eq(cache.forDay(day).map(e => e.title), ['Deploy', 'Standup', 'Daily (moved)'], 'recurring update replaces the series');
+    t.eq(cache.forDay(new Date(2026, 9, 27, 12)).map(e => e.title), ['Deploy'], 'the old instances are gone');
+
+    t.check(cache.remove(['src\nsolo\n']), 'remove() reports a change');
+    t.check(!cache.remove(['src\nnothing\n']), 'removing an unknown id is no change');
+    t.eq(cache.forDay(day).map(e => e.title), ['Deploy', 'Daily (moved)'], 'removed by id prefix');
+
+    cache.add([['other\nx\n', 'Other calendar', sec(2026, 10, 28, 14), sec(2026, 10, 28, 15), {}]]);
+    t.check(cache.clientDisappeared('src'), 'clientDisappeared() reports a change');
+    t.eq(cache.forDay(day).map(e => e.title), ['Other calendar'], 'a vanished calendar takes its events with it');
+
+    cache.prune(new Date(2026, 9, 29));
+    t.eq(cache.size, 0, 'prune() drops events that ended before the given time');
+    t.check(!cache.add([]), 'an empty batch is no change');
+}
+
+function serverWindow(t) {
+    const day = [sec(2026, 10, 28, 0), sec(2026, 10, 29, 0)];
+    t.eq(widenRange(day, null), {since: day[0], until: day[1], changed: true}, 'no window yet: ask for the day');
+    t.eq(widenRange(day, [0, 0]), {since: day[0], until: day[1], changed: true}, 'an empty window counts as none');
+    // The shell's month grid (Sep 28 - Nov 8) already covers today: nothing to change.
+    const month = [sec(2026, 9, 28, 0), sec(2026, 11, 8, 0)];
+    t.eq(widenRange(day, month), {since: month[0], until: month[1], changed: false}, 'a window that covers the day stays');
+    // The shell shows December: keep its window and add today, so its calendar keeps its events.
+    const december = [sec(2026, 11, 30, 0), sec(2027, 1, 11, 0)];
+    t.eq(widenRange(day, december), {since: day[0], until: december[1], changed: true}, 'widened to cover both');
+    const far = [sec(2027, 6, 1, 0), sec(2027, 7, 12, 0)];
+    t.eq(widenRange(day, far), {since: day[0], until: day[1], changed: true}, 'too far away: only the day');
+}
+
+async function calendarSource(t) {
+    const prefs = Prefs.memory({demoMode: true});
+    const cal = new CalendarSource(prefs);
+    let changed = 0;
+    cal.on('changed', () => changed++);
+    await cal.start();
+    t.eq(changed, 1, 'start() emits changed once');
+    t.eq([cal.kind, cal.hasJoinLinks, cal.events(new Date()).length], ['demo', true, 2], 'demo mode: the two demo meetings');
+    t.eq(cal.events(new Date()).map(e => e.id), ['demo-1', 'demo-2'], 'demo events keep their ids');
+    const first = cal.events(new Date())[0].start.getTime();
+    t.eq(cal.events(new Date())[0].start.getTime(), first, 'demo times do not move between calls');
+    t.check(cal._sources.size === 2, 'start() adds the 10-minute and the midnight sources');
+
+    prefs._backend.set('useCalendar', false);
+    t.eq([changed, cal.kind, cal.hasJoinLinks, cal.events(new Date())], [2, 'off', false, []],
+        'turning the calendar off empties it and emits changed');
+    prefs._backend.set('petName', 'Bo');
+    t.eq(changed, 2, 'other preferences do not reload the calendar');
+    prefs._backend.set('useCalendar', true);
+    t.eq([changed, cal.kind], [3, 'demo'], 'turned back on');
+
+    const ids = [...cal._sources];
+    cal.stop();
+    t.check(cal._sources.size === 0 && ids.every(id => !sourceExists(id)), 'stop() removes its sources');
+    prefs._backend.set('useCalendar', false);
+    t.eq(changed, 3, 'stop() disconnects from the preferences');
+    cal.stop();
+    await cal.start();
+    t.eq([cal.kind, cal.events(new Date())], ['off', []], 'start() after stop() works; off makes no D-Bus call');
+    t.check(cal.serverInfo() === null, 'no calendar server proxy when the calendar is off');
+    cal.stop();
+}
+
+export default async function (t) {
+    speechAndSound(t);
+    idleWatch(t);
+    focusWatch(t);
+    serverEvents(t);
+    serverWindow(t);
+    await calendarSource(t);
+}

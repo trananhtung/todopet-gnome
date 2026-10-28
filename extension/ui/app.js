@@ -6,14 +6,24 @@
 //   TODOPET_NO_SECRETS=1  do not touch libsecret/the keyring; the nested session can reach the real one.
 import GLib from 'gi://GLib';
 import Gio from 'gi://Gio';
+import Shell from 'gi://Shell';
 
 import {Prefs} from '../core/prefs.js';
+import {CalendarSource} from '../services/calendar.js';
+import {FocusWatch} from '../services/focusWatch.js';
+import {IdleWatch} from '../services/idle.js';
+import {SessionWatch} from '../services/session.js';
 
 export class App {
     constructor(extension) {
         this.extension = extension;
         this.settings = null;
         this.prefs = null;
+        // Shell services (services/*.js); speech.js and sound.js are plain functions.
+        this.idle = null;
+        this.focus = null;
+        this.calendar = null;
+        this.session = null;
         // Filled in by later tasks.
         this.brain = null;
         this.pet = null;
@@ -24,6 +34,7 @@ export class App {
 
         this._prefIds = [];
         this._scenesCancellable = null;
+        this._stopped = false;
     }
 
     async start() {
@@ -32,14 +43,33 @@ export class App {
         if (this.prefs.firstLaunch === 0)
             this.prefs.firstLaunch = Date.now();
 
+        this.idle = new IdleWatch();
+        this.focus = new FocusWatch({tracker: Shell.WindowTracker.get_default()});
+        this.session = new SessionWatch();
+        this.calendar = new CalendarSource(this.prefs);
+        this.idle.start();
+        this.focus.start();
+        this.session.start();
+        await this.calendar.start();
+        if (this._stopped)
+            return;
+
         // Keep this last: scenes expect everything above to be running.
         this._startDevScenes();
     }
 
     // Undoes everything start() did. Safe to call twice, and before start() has finished.
     stop() {
+        this._stopped = true;
         this._scenesCancellable?.cancel();
         this._scenesCancellable = null;
+
+        for (const service of [this.calendar, this.session, this.focus, this.idle])
+            service?.stop();
+        this.calendar = null;
+        this.session = null;
+        this.focus = null;
+        this.idle = null;
 
         for (const id of this._prefIds)
             this.prefs?.disconnect(id);

@@ -9,6 +9,8 @@ import Gio from 'gi://Gio';
 import Shell from 'gi://Shell';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
+import {hasSpeech} from '../services/speech.js';
+
 Gio._promisify(Gio.File.prototype, 'replace_async', 'replace_finish');
 Gio._promisify(Gio.OutputStream.prototype, 'close_async', 'close_finish');
 
@@ -163,4 +165,29 @@ registerScene('smoke', async ctx => {
     Main.overview.hide();
     await ctx.wait(1000);
     await ctx.shot('smoke');
+});
+
+// The Shell services: one line with what they read, then each one is stopped twice and started again (the log
+// must stay clean). Nothing is spoken or played: the nested shell would reach the real session's audio.
+registerScene('services', async ctx => {
+    const {app} = ctx;
+    await ctx.wait(2000);
+    const line = () => {
+        const events = app.calendar.events(new Date()).length;
+        return `idle=${Math.round(app.idle.idleSeconds())} key=${Math.round(app.idle.secondsSinceKey())} ` +
+            `focus=${app.focus.current?.wmClass || 'none'} calendar=${app.calendar.kind} events=${events} speech=${hasSpeech()}`;
+    };
+    console.log(`TODOPET services ${line()}`);
+    const info = app.calendar.serverInfo();
+    if (info)
+        console.log(`TODOPET services calendar backend ${JSON.stringify(info)}`);
+
+    const services = [app.idle, app.focus, app.session, app.calendar];
+    for (const service of services) {
+        service.stop();
+        service.stop();
+    }
+    await Promise.all(services.map(service => service.start()));
+    await ctx.wait(1000);
+    console.log(`TODOPET services restarted ${line()}`);
 });

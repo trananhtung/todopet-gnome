@@ -12,7 +12,7 @@
 set -euo pipefail
 
 # Scenes played by default, in this order. A task that adds a scene appends its id here.
-SCENES=(smoke)
+SCENES=(smoke services)
 
 UUID=todopet@trananhtung.github.io
 MONITOR=1600x900
