@@ -1,0 +1,31 @@
+name: Release
+
+# Pushing a tag such as v0.1.0 builds the extension zip and attaches it to a GitHub release.
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      # `make pack` runs `gnome-extensions pack`, which comes from the gnome-shell package;
+      # glib-compile-schemas (libglib2.0-bin) compiles the settings schema.
+      - name: Install system packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends gnome-shell libglib2.0-bin
+
+      - name: Build the extension zip
+        run: make pack
+
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" build/*.shell-extension.zip --generate-notes
