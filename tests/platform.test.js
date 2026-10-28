@@ -4,7 +4,7 @@
 import GLib from 'gi://GLib';
 
 import {Prefs} from '../extension/core/prefs.js';
-import {CalendarSource, ServerEvents, dayBounds, planTimeRange} from '../extension/services/calendar.js';
+import {CalendarSource, EcalBackend, ServerEvents, dayBounds, planTimeRange} from '../extension/services/calendar.js';
 import {BROWSER_APP_IDS, FocusWatch, isBrowserWindow} from '../extension/services/focusWatch.js';
 import {IdleWatch} from '../extension/services/idle.js';
 import {CHIME_SOUNDS, playChime, shouldPlay} from '../extension/services/sound.js';
@@ -311,6 +311,44 @@ async function calendarSource(t) {
     cal.stop();
 }
 
+// The ECal source's refresh, with stand-ins for ECal and the source registry: a calendar whose client cannot be had,
+// or whose events cannot be read, is a warning (once per calendar), never a promise rejected with nobody waiting.
+async function ecalRefresh(t) {
+    const source = (uid, name) => ({
+        get_uid: () => uid,
+        get_display_name: () => name,
+        get_extension: () => ({get_selected: () => true}),
+        has_extension: () => false,
+        get_parent: () => null,
+    });
+    const backend = new EcalBackend({ECal: {}, EDataServer: {}, ICalGLib: {}}, () => {});
+    backend._registry = {
+        list_enabled: () => [source('work', 'Work'), source('home', 'Home')],
+        list_sources: () => [],
+    };
+    backend._client = s => (s.get_uid() === 'work'
+        ? Promise.resolve({})
+        : Promise.reject(new Error('fake: the calendar factory is gone')));
+    backend._generate = () => {
+        throw new Error('fake: generate_instances failed');
+    };
+    const warned = [];
+    backend._warnOnce = (key, message) => warned.push([key, message]);
+    const flush = async () => {
+        for (let i = 0; i < 5; i++)
+            await Promise.resolve();
+    };
+    backend.refresh();
+    await flush();
+    backend.refresh();
+    await flush();
+    t.eq(warned.map(([key]) => key).sort(), ['home:refresh', 'home:refresh', 'work:refresh', 'work:refresh'],
+        'ECal refresh: a failed client and failed events are caught, under one key per calendar (logged once)');
+    t.check(warned.some(([, message]) => message === "TodoPet: could not read calendar 'Work': fake: generate_instances failed"),
+        'ECal refresh: the warning names the calendar and the reason');
+    backend.stop();
+}
+
 export default async function (t) {
     speechAndSound(t);
     idleWatch(t);
@@ -318,4 +356,5 @@ export default async function (t) {
     serverEvents(t);
     serverWindow(t);
     await calendarSource(t);
+    await ecalRefresh(t);
 }

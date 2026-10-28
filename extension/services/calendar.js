@@ -303,8 +303,9 @@ class ServerBackend {
 // --- Source: Evolution Data Server through gi://ECal (gir1.2-ecal-2.0) ---
 // Written against libecal 2.0 / libedataserver 1.2. Every call that talks to the backends is the async one;
 // the instances of recurring events are expanded by ECal.Client.generate_instances.
+// Exported for the tests, which run it with stand-ins (gir1.2-ecal-2.0 may not be installed).
 
-class EcalBackend {
+export class EcalBackend {
     constructor({ECal, EDataServer, ICalGLib}, onChanged) {
         this._ECal = ECal;
         this._EDS = EDataServer;
@@ -386,10 +387,12 @@ class EcalBackend {
         const emails = this._myAddresses(sources);
         const [start, end] = dayBounds(new Date());
         for (const source of sources) {
+            const uid = source.get_uid();
             this._client(source).then(client => {
                 if (client && generation === this._generation)
-                    this._generate(source.get_uid(), client, start, end, emails, generation);
-            });
+                    this._generate(uid, client, start, end, emails, generation);
+            }).catch(e => this._warnOnce(`${uid}:refresh`,
+                `TodoPet: could not read calendar '${source.get_display_name()}': ${e?.message ?? e}`));
         }
     }
 
