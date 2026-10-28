@@ -5,6 +5,9 @@
 #
 #   tools/nested.sh [scene...]     scenes default to $SCENES below; 'prefs:Day' passes an argument to a scene
 #
+# The nested session gets TODOPET_NESTED=1 (the extension plays dev scenes only then) and TODOPET_NO_SECRETS=1
+# (the extension must not touch the keyring, which the nested session could otherwise reach).
+#
 # Exit 0: every scene ran and the log has no errors. Exit 1: the reason is printed.
 set -euo pipefail
 
@@ -17,8 +20,10 @@ TIMEOUT_SECONDS=180
 ERROR_GRACE_SECONDS=20
 # What counts as an error in the log: uncaught JS exceptions, anything logged with console.error or logError
 # (GNOME Shell turns those into "GNOME Shell-CRITICAL"), failed scenes, and any line that mentions todopet and
-# an error. Warnings from mutter, GTK and D-Bus are noise on a headless run and do not count.
-ERROR_PATTERN='JS ERROR|GNOME Shell-CRITICAL|TODOPET SCENE ERROR|todopet.*error|error.*todopet'
+# an error. gjs reports a promise that rejected with nobody waiting for it as a Gjs-WARNING whose own line says
+# neither "todopet" nor "JS ERROR", so that message is matched by name; Gjs-WARNING as a whole is noise here
+# (for example the NM.Object::client line on every run), as are warnings from mutter, GTK and D-Bus.
+ERROR_PATTERN='JS ERROR|GNOME Shell-CRITICAL|Unhandled promise rejection|TODOPET SCENE ERROR|todopet.*error|error.*todopet'
 
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
 NESTED="$ROOT/build/nested"
@@ -68,6 +73,8 @@ setsid env \
     XDG_CONFIG_HOME="$NESTED/config" \
     XDG_CACHE_HOME="$NESTED/cache" \
     XDG_STATE_HOME="$NESTED/state" \
+    TODOPET_NESTED=1 \
+    TODOPET_NO_SECRETS=1 \
     dbus-run-session -- bash -c '
         set -e
         uuid=$1 shots=$2 scenes=$3 monitor=$4 limit=$5
@@ -76,11 +83,24 @@ setsid env \
         dconf write /org/gnome/shell/extensions/todopet/demo-mode true
         dconf write /org/gnome/shell/extensions/todopet/dev-screenshot-dir "\"$shots\""
         dconf write /org/gnome/shell/extensions/todopet/dev-scenes "$scenes"
-        exec timeout "$limit" gnome-shell --headless --virtual-monitor "$monitor"
+        # --foreground: without it timeout moves gnome-shell into a process group of its own, out of reach of
+        # the group kill below.
+        exec timeout --foreground "$limit" gnome-shell --headless --virtual-monitor "$monitor"
     ' _ "$UUID" "$SHOTS" "$scenes_gvariant" "$MONITOR" "$TIMEOUT_SECONDS" > "$LOG" 2>&1 &
 runner=$!
-# Ctrl-C (or any exit) must not leave a shell behind in its own process group.
-trap 'kill -TERM -- "-$runner" 2> /dev/null || true' EXIT
+
+# Stops everything the run started (the shell and the D-Bus helpers share one process group): SIGTERM, up to 10 s
+# for the shell to shut down, then SIGKILL. Do not start the next run on top of a shell that is still shutting down.
+stop_group() {
+    kill -TERM -- "-$runner" 2> /dev/null || return 0
+    for _ in {1..50}; do
+        kill -0 -- "-$runner" 2> /dev/null || return 0
+        sleep 0.2
+    done
+    kill -KILL -- "-$runner" 2> /dev/null || true
+}
+# Ctrl-C (or any other exit) must not leave a shell behind.
+trap stop_group EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM HUP
 
@@ -101,17 +121,12 @@ while kill -0 "$runner" 2> /dev/null; do
             aborted="the scenes had not finished $ERROR_GRACE_SECONDS s after the first error"
     fi
     if [[ -n "$aborted" ]]; then
-        kill -TERM -- "-$runner" 2> /dev/null || true
+        stop_group
         break
     fi
 done
 wait "$runner" || status=$?
-# Helper daemons and a shell that is still shutting down need a moment; do not start the next run on top of them.
-for _ in {1..50}; do
-    kill -0 -- "-$runner" 2> /dev/null || break
-    sleep 0.2
-done
-kill -KILL -- "-$runner" 2> /dev/null || true
+stop_group # helper daemons may outlive the shell by a moment
 
 reasons=()
 if [[ -n "$aborted" ]]; then
