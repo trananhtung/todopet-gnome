@@ -1,0 +1,41 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      # ESLint 10 needs Node 20.19+, which the runner image does not always ship.
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install system packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gjs gir1.2-soup-3.0 gir1.2-secret-1 gir1.2-pango-1.0 libglib2.0-bin
+
+      - name: Install npm dependencies
+        run: npm ci
+
+      - name: Lint
+        run: make lint
+
+      - name: Test
+        run: make test
+
+      - name: Snapshots
+        run: if [ -f tools/snapshot.js ]; then make snapshot; fi
+
+      - name: Upload snapshots
+        uses: actions/upload-artifact@v6
+        with:
+          name: snapshots
+          path: out/
+          if-no-files-found: ignore

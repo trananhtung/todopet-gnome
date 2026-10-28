@@ -1,0 +1,9 @@
+{
+  "uuid": "todopet@trananhtung.github.io",
+  "name": "TodoPet",
+  "description": "A desktop pet that reads your Todoist tasks. It gets happy when you work and grumpy when you don't.",
+  "shell-version": ["50"],
+  "session-modes": ["user", "unlock-dialog"],
+  "settings-schema": "org.gnome.shell.extensions.todopet",
+  "url": "https://github.com/trananhtung/todopet-gnome"
+}

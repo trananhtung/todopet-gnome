@@ -1,0 +1,202 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<schemalist>
+  <schema id="org.gnome.shell.extensions.todopet" path="/org/gnome/shell/extensions/todopet/">
+
+    <key name="lang" type="s">
+      <default>''</default>
+      <summary>Interface language</summary>
+      <description>Either 'en' or 'vi'. Empty follows the system language.</description>
+    </key>
+    <key name="pet-name" type="s">
+      <default>'Mochi'</default>
+      <summary>Pet name</summary>
+      <description>The name the pet answers to and uses in its speech bubbles.</description>
+    </key>
+    <key name="daily-target" type="i">
+      <default>3</default>
+      <summary>Daily target</summary>
+      <description>How many tasks you should plan for each day (the "Rule of 3").</description>
+    </key>
+    <key name="work-start" type="i">
+      <default>8</default>
+      <summary>Work day start hour</summary>
+      <description>Hour of the day (0-23) when your working day begins.</description>
+    </key>
+    <key name="work-end" type="i">
+      <default>18</default>
+      <summary>Work day end hour</summary>
+      <description>Hour of the day (0-23) when your working day ends.</description>
+    </key>
+    <key name="plan-deadline" type="i">
+      <default>10</default>
+      <summary>Planning deadline hour</summary>
+      <description>After this hour the pet gets grumpy if today is not planned yet.</description>
+    </key>
+    <key name="remind-every" type="i">
+      <default>45</default>
+      <summary>Reminder interval in minutes</summary>
+      <description>How often the pet nudges you about the next task.</description>
+    </key>
+    <key name="focus-minutes" type="i">
+      <default>25</default>
+      <summary>Focus session length in minutes</summary>
+      <description>Length of one focus timer session.</description>
+    </key>
+    <key name="break-minutes" type="i">
+      <default>5</default>
+      <summary>Break length in minutes</summary>
+      <description>Length of the break that follows a finished focus session.</description>
+    </key>
+    <key name="filter-query" type="s">
+      <default>'today | overdue'</default>
+      <summary>Todoist filter</summary>
+      <description>Todoist filter that defines "my day". Empty falls back to 'today | overdue'.</description>
+    </key>
+    <key name="distraction-apps" type="s">
+      <default>'TikTok, Netflix, Steam, Facebook'</default>
+      <summary>Distracting apps</summary>
+      <description>Comma-separated app names that count as distractions.</description>
+    </key>
+    <key name="sound-mode" type="s">
+      <choices>
+        <choice value="off"/>
+        <choice value="important"/>
+        <choice value="all"/>
+      </choices>
+      <default>'important'</default>
+      <summary>Sound mode</summary>
+      <description>'off' is silent. 'important' plays sounds for meetings, tasks due now, the end of a focus session and finished tasks; ordinary bubbles stay silent. 'all' plays a sound for every bubble and every grumble.</description>
+    </key>
+    <key name="work-saturday" type="b">
+      <default>false</default>
+      <summary>Work on Saturdays</summary>
+      <description>Treat Saturday as a working day.</description>
+    </key>
+    <key name="work-sunday" type="b">
+      <default>false</default>
+      <summary>Work on Sundays</summary>
+      <description>Treat Sunday as a working day.</description>
+    </key>
+    <key name="pet-scale" type="d">
+      <default>1.0</default>
+      <summary>Pet size</summary>
+      <description>Scale factor for the pet's size on screen.</description>
+    </key>
+    <key name="chase-when-angry" type="b">
+      <default>true</default>
+      <summary>Chase the pointer when angry</summary>
+      <description>When the pet is grumpy it marches toward the mouse pointer.</description>
+    </key>
+    <key name="watch-browsers" type="b">
+      <default>true</default>
+      <summary>Watch browser tabs</summary>
+      <description>Read the active browser tab title to notice distracting websites.</description>
+    </key>
+    <key name="distraction-sites" type="s">
+      <default>'youtube.com, facebook.com, tiktok.com, instagram.com, x.com, reddit.com, netflix.com'</default>
+      <summary>Distracting sites</summary>
+      <description>Comma-separated sites ("youtube.com") or address parts ("youtube.com/shorts").</description>
+    </key>
+    <key name="use-calendar" type="b">
+      <default>true</default>
+      <summary>Use the calendar</summary>
+      <description>Read calendar events to warn you before meetings and to plan around them.</description>
+    </key>
+    <key name="adapt-target" type="b">
+      <default>true</default>
+      <summary>Adapt the target to meetings</summary>
+      <description>Lower the daily target on meeting-heavy days.</description>
+    </key>
+    <key name="meeting-lead" type="i">
+      <default>5</default>
+      <summary>Meeting warning lead in minutes</summary>
+      <description>How many minutes before a meeting the pet warns you.</description>
+    </key>
+    <key name="stuck-days" type="i">
+      <default>3</default>
+      <summary>Days before a task counts as stuck</summary>
+      <description>After this many days on your list, a task counts as "keeps getting postponed".</description>
+    </key>
+    <key name="claude-model" type="s">
+      <default>'claude-opus-5-5'</default>
+      <summary>Claude model</summary>
+      <description>Model used for the optional Claude features. Empty falls back to the default model.</description>
+    </key>
+    <key name="antics" type="b">
+      <default>true</default>
+      <summary>Antics</summary>
+      <description>Escalating mischief when you slack off (grumbling, sign parade, standing in the way).</description>
+    </key>
+    <key name="voice-on" type="b">
+      <default>false</default>
+      <summary>Speak aloud</summary>
+      <description>Say some lines out loud with a text-to-speech voice.</description>
+    </key>
+    <key name="protect-flow" type="b">
+      <default>true</default>
+      <summary>Protect flow</summary>
+      <description>Hold non-urgent bubbles while you're typing steadily ("in the zone").</description>
+    </key>
+    <key name="still-while-typing" type="b">
+      <default>true</default>
+      <summary>Stay still while typing</summary>
+      <description>Keep the pet still (no walking, small movements) while you type.</description>
+    </key>
+    <key name="bubble-gap" type="i">
+      <default>15</default>
+      <summary>Minimum minutes between bubbles</summary>
+      <description>Minimum minutes between two unsolicited bubbles.</description>
+    </key>
+    <key name="keep-log" type="b">
+      <default>true</default>
+      <summary>Keep the pet's diary</summary>
+      <description>Keep the pet's diary (on this computer only, 14 days).</description>
+    </key>
+    <key name="first-launch" type="x">
+      <default>0</default>
+      <summary>First launch time</summary>
+      <description>Unix time in milliseconds when the extension first ran; 0 means not set yet. Used so day one doesn't start with a grumpy pet.</description>
+    </key>
+    <key name="board-hotkey" type="as">
+      <default>['&lt;Control&gt;&lt;Super&gt;t']</default>
+      <summary>Board shortcut</summary>
+      <description>Keyboard shortcut that opens the task board.</description>
+    </key>
+    <key name="hidden-until" type="x">
+      <default>0</default>
+      <summary>Hidden until</summary>
+      <description>Unix time in milliseconds until which the pet stays hidden; 0 means the pet is not hidden.</description>
+    </key>
+    <key name="quiet-until" type="x">
+      <default>0</default>
+      <summary>Quiet until</summary>
+      <description>Unix time in milliseconds until which the pet stays quiet (no unsolicited bubbles); 0 means not quiet.</description>
+    </key>
+    <key name="demo-mode" type="b">
+      <default>false</default>
+      <summary>Demo mode</summary>
+      <description>Developer option. Run with built-in sample tasks and events instead of Todoist and the calendar.</description>
+    </key>
+    <key name="dev-screenshot-dir" type="s">
+      <default>''</default>
+      <summary>Screenshot directory</summary>
+      <description>Developer option. Directory where scene screenshots are saved when dev-scenes is set.</description>
+    </key>
+    <key name="dev-scenes" type="as">
+      <default>[]</default>
+      <summary>Scenes to play</summary>
+      <description>Developer option. Names of scenes the extension plays on start, saving a screenshot of each into dev-screenshot-dir.</description>
+    </key>
+    <key name="dev-trigger" type="s">
+      <default>''</default>
+      <summary>Developer trigger</summary>
+      <description>Developer option. Writing a command here makes the extension act on it (for example 'parade' or 'golden'); the extension resets it to empty afterwards.</description>
+    </key>
+    <key name="secrets-serial" type="i">
+      <default>0</default>
+      <summary>Secrets change counter</summary>
+      <description>Incremented by the preferences window whenever a stored secret changes, so the extension knows to reload its tokens.</description>
+    </key>
+
+  </schema>
+</schemalist>
