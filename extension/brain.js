@@ -19,9 +19,9 @@
 // (and emits 'bubble' with null).
 //
 // Sections, in Brain.swift order: token and demo, sync, mood, life settlement, talking, tick.
-// The reminder rules, flow and distraction tracking and mischief live in brain/rules.js and are installed as Brain
-// methods at the end of this file (runRules, updateFlow, trackDistraction and their helpers). The task actions and
-// focus sessions (Task 16) build on the state laid out in the constructor; their place in tick is marked below.
+// The reminder rules, flow and distraction tracking and mischief live in brain/rules.js, and the task actions and
+// focus sessions in brain/actions.js; both are installed as Brain methods at the end of this file (runRules,
+// updateFlow, trackDistraction; complete, add, reschedule, delete, split, startFocus... and their helpers).
 import {atHour, dayKey, parseDate, shortText, timeString} from './core/dates.js';
 import {currentEvent, freeMinutes, suggest, targetFor} from './core/calendarMath.js';
 import {PetLog} from './core/diary.js';
@@ -33,6 +33,7 @@ import {DaySnapshot} from './core/models.js';
 import {Mood, defaultMoodInputs, evaluateMood, moodLabel} from './core/mood.js';
 import {isBrowser, matchTitle} from './core/sites.js';
 import {StuckTracker} from './core/stuck.js';
+import {installActions} from './brain/actions.js';
 import {installRules} from './brain/rules.js';
 import {demoEvents} from './services/demo.js';
 import {SECRET_ANTHROPIC, SECRET_TODOIST} from './services/secrets.js';
@@ -164,7 +165,8 @@ export class Brain extends Emitter {
         // The rule that spoke last (null until one does; a held reminder does not change it). From brain/rules.js:
         // meeting, due, morning, plan, distraction, stuck, hungry, antic (block, parade or grumble), overdue,
         // timeblock, review, nudge, tip, and Swift's other messages: token (no Todoist token), welcome (back after
-        // being away), night, alldone, distractsum. Task 16 adds focusEnd.
+        // being away), night, alldone, distractsum. From brain/actions.js: focusEnd (a focus session's time is up)
+        // and breakEnd (a break's time is up).
         this.lastRule = null;
         this.closeDayCalls = 0;
 
@@ -221,6 +223,12 @@ export class Brain extends Emitter {
         this._lifeReadFailed = false;
         this._trackerReadFailed = false;
         this._lastReadTry = NEVER;
+        // The keyring could not be read (it is retried every slow tick): the Todoist token, the Claude key.
+        this._tokenUnread = false;
+        this._claudeKeyUnread = false;
+        this._keyringLogged = false;
+        this._keyringRetry = null;
+        this._claudeClients = new Set(); // suggestSteps requests in flight, aborted by stop()
         this._lastTickAt = null;
         this._lastSlowTick = null;
         this._bubbleSeq = 0;
@@ -252,6 +260,9 @@ export class Brain extends Emitter {
         await this._readSaved(this._now());
         if (this._stopped)
             return;
+        await this._restoreFocus(this._now());
+        if (this._stopped)
+            return;
         const quiet = this.prefs.quietUntil;
         if (quiet > this._now().getTime())
             this.quietUntil = new Date(quiet);
@@ -272,7 +283,7 @@ export class Brain extends Emitter {
         this.recompute(now);
         if (this.hasToken)
             this.refreshSoon();
-        else
+        else if (!this._tokenUnread)
             this._askTokenAt = new Date(now.getTime() + ASK_TOKEN_DELAY_MS);
         this._ready = true;
     }
@@ -289,6 +300,9 @@ export class Brain extends Emitter {
             this.calendar?.off?.(this._calendarId);
         this._calendarId = null;
         this.todo?.abort?.();
+        for (const client of this._claudeClients)
+            client.abort?.();
+        this._claudeClients.clear();
         this._serviceGen += 1;
         this._refreshing = null;
         this.loading = false;
@@ -392,18 +406,13 @@ export class Brain extends Emitter {
     }
 
     // Reads the keyring again (the Settings window bumps `secrets-serial` after changing a secret): a new Todoist
-    // token connects, a removed one disconnects. The demo chosen in the settings stays.
+    // token connects, a removed one disconnects. The demo chosen in the settings stays. The token and the Claude key
+    // are read one by one: one that cannot be read keeps what the brain had, and the slow tick tries again.
     async reloadSecrets() {
-        let token, key;
-        try {
-            token = await this.env.lookupSecret(SECRET_TODOIST);
-            key = await this.env.lookupSecret(SECRET_ANTHROPIC);
-        } catch (e) {
-            this._log(`TodoPet: could not read the keyring: ${e?.message ?? e}`);
+        const {token, tokenRead} = await this._readSecrets();
+        if (this._stopped)
             return;
-        }
-        this.hasClaudeKey = Boolean(key);
-        if (!this.prefs.demoMode) {
+        if (tokenRead && !this.prefs.demoMode) {
             if (token && token !== this._token) {
                 this._useToken(token);
                 this.errorText = null;
@@ -434,20 +443,55 @@ export class Brain extends Emitter {
         }, {tag: 'askToken'});
     }
 
+    // start(): a token in the keyring connects. A keyring that cannot be read is not "no token": no hello then.
     async _loadSecrets() {
+        const {token} = await this._readSecrets();
+        if (token)
+            this._useToken(token);
+    }
+
+    // Reads the Todoist token and the Claude key, each on its own. Updates hasClaudeKey when the key could be read,
+    // and remembers what could not be read (the slow tick tries again). The first failure in a row is logged.
+    async _readSecrets() {
         let token = null;
+        let tokenRead = true;
         try {
             token = await this.env.lookupSecret(SECRET_TODOIST);
         } catch (e) {
-            this._log(`TodoPet: could not read the Todoist token from the keyring: ${e?.message ?? e}`);
+            tokenRead = false;
+            this._keyringFailed('the Todoist token', e);
         }
+        let keyRead = true;
         try {
             this.hasClaudeKey = Boolean(await this.env.lookupSecret(SECRET_ANTHROPIC));
-        } catch {
-            this.hasClaudeKey = false;
+        } catch (e) {
+            keyRead = false;
+            this._keyringFailed('the Claude key', e);
         }
-        if (token)
-            this._useToken(token);
+        this._tokenUnread = !tokenRead;
+        this._claudeKeyUnread = !keyRead;
+        if (tokenRead && keyRead)
+            this._keyringLogged = false;
+        return {token, tokenRead};
+    }
+
+    _keyringFailed(what, e) {
+        if (this._keyringLogged)
+            return;
+        this._keyringLogged = true;
+        this._log(`TodoPet: could not read ${what} from the keyring, trying again every 15 s: ${e?.message ?? e}`);
+    }
+
+    // The slow tick's new try at a keyring that could not be read. Once it answers without a token, the hello
+    // that start() held back comes.
+    async _retrySecrets() {
+        try {
+            await this.reloadSecrets();
+            if (!this._stopped && !this._tokenUnread && !this.hasToken && this._askTokenAt === null)
+                this._askTokenAt = new Date(this._now().getTime() + ASK_TOKEN_DELAY_MS);
+        } finally {
+            this._keyringRetry = null;
+        }
     }
 
     _useToken(token, client = this._todoFactory(token, false)) {
@@ -928,12 +972,12 @@ export class Brain extends Emitter {
                 lines.push(Lines.levelUp(levelUp));
             if (unlocked.length > 0)
                 lines.push(Lines.unlocked(unlocked));
-            this._showBubble(makeBubble({
+            this._setBubble({
                 text: lines.join('\n'),
                 actions,
                 seconds: unlocked.length === 0 && levelUp === null ? 8 : 14,
                 urgent: true,
-            }, this._nextBubbleId()));
+            });
             this.lastBubbleAt = now;
             if (big)
                 this._speak(Lines.voiceCheer());
@@ -1050,6 +1094,12 @@ export class Brain extends Emitter {
         return true;
     }
 
+    // Puts a bubble up directly, as Swift's `bubble = Bubble(...)`: no diary line, no chime, and it replaces whatever
+    // is on screen. The caller sets lastBubbleAt where Swift does.
+    _setBubble(b) {
+        this._showBubble(makeBubble(b, this._nextBubbleId()));
+    }
+
     _showBubble(bubble) {
         this.bubble = bubble;
         this._bubbleUntil = bubble ? new Date(this._now().getTime() + bubble.seconds * SECOND + BUBBLE_GRACE_MS) : null;
@@ -1099,6 +1149,10 @@ export class Brain extends Emitter {
             this._recomputeAt = null;
             this.recompute(now);
         }
+        // A focus session or break whose time is up (brain/actions.js). Swift checks in its 15-second tick; this
+        // checks every second, so the bubble comes when the board's countdown reaches zero.
+        if (this.focusSession && now >= this.focusSession.end)
+            this._finishFocus(now);
         if (this._lastSlowTick === null || now - this._lastSlowTick >= SLOW_TICK_MS || now < this._lastSlowTick) {
             this._lastSlowTick = now;
             this._slowTick(now);
@@ -1107,7 +1161,8 @@ export class Brain extends Emitter {
 
     // Swift's tick().
     _slowTick(now) {
-        // Task 16: end the focus session that is over.
+        if ((this._tokenUnread || this._claudeKeyUnread) && this._keyringRetry === null)
+            this._keyringRetry = this._track(this._retrySecrets());
         const backedOff = this._syncBackoffUntil !== null && now < this._syncBackoffUntil;
         if (this.hasToken && !this.loading && !backedOff && (this.lastSync === null || now - this.lastSync > SYNC_MS))
             this.refreshSoon();
@@ -1225,3 +1280,6 @@ export class Brain extends Emitter {
 
 // runRules(now), updateFlow(now), trackDistraction(now) and the rules' helpers (brain/rules.js).
 installRules(Brain);
+// complete, undoComplete, add, reschedule, pullOverdueToToday, moveTodayToTomorrow, schedule, delete, unplan,
+// suggestSteps, split, startFocus, startBreak, stopFocus and their helpers (brain/actions.js).
+installActions(Brain);

@@ -17,6 +17,7 @@ const TESTS = [
     './art.test.js',
     './brain-core.test.js',
     './brain-rules.test.js',
+    './brain-actions.test.js',
 ];
 
 const t = new T();

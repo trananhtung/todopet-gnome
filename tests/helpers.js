@@ -318,7 +318,8 @@ export class FakeCalendar extends Emitter {
 
 // The brain's view of the desktop. Each value can be changed by a test afterwards:
 //   idle (seconds), sinceKey (seconds since a key press), focused ({appName, wmClass, title, isBrowser, since}|null),
-//   appSwitch (Date), secrets (Map item -> value; `secretsFail` makes every keyring call reject).
+//   appSwitch (Date), secrets (Map item -> value; `secretsFail`: true makes every keyring call reject, an array of
+//   items only the calls for those items).
 // What the brain did is recorded in `spoken`, `played` and `opened`.
 // `typingSince` means "typing right now": secondsSinceKey() is 0 (makeBrain also starts the engaged time there).
 export class FakeEnv {
@@ -362,21 +363,23 @@ export class FakeEnv {
         this.opened.push(url);
     }
 
-    async lookupSecret(item) {
-        if (this.secretsFail)
+    _keyring(item) {
+        if (this.secretsFail === true || (Array.isArray(this.secretsFail) && this.secretsFail.includes(item)))
             throw new Error('FakeEnv: the keyring is not available');
+    }
+
+    async lookupSecret(item) {
+        this._keyring(item);
         return this.secrets.get(item) ?? null;
     }
 
     async storeSecret(item, value) {
-        if (this.secretsFail)
-            throw new Error('FakeEnv: the keyring is not available');
+        this._keyring(item);
         this.secrets.set(item, value);
     }
 
     async clearSecret(item) {
-        if (this.secretsFail)
-            throw new Error('FakeEnv: the keyring is not available');
+        this._keyring(item);
         this.secrets.delete(item);
     }
 }

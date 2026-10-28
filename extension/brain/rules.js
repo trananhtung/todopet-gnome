@@ -130,8 +130,8 @@ class RuleMethods {
             return;
 
         if (!this.hasToken) {
-            // The hello shortly after start counts as the first ask.
-            if (this._askTokenAt === null && this._every('token', 60, now)) {
+            // The hello shortly after start counts as the first ask. A keyring that cannot be read is not "no token".
+            if (this._askTokenAt === null && !this._tokenUnread && this._every('token', 60, now)) {
                 this._askForToken();
                 this.lastRule = 'token';
             }
