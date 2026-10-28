@@ -122,14 +122,16 @@ async function jsonStoreTests(t, fresh) {
     t.eq(await store.load('count'), {i: 19}, 'writes of one name never overtake each other');
 
     // --- Debounce: a later save restarts the wait ---
+    // Wide margins for a busy CI machine: the second save comes 300 ms before the first wait would end, and the file
+    // is looked for 100 ms after that end and 200 ms before the restarted wait ends.
     const slowDir = fresh();
-    const slow = new JsonStore(slowDir, {delay: 200});
+    const slow = new JsonStore(slowDir, {delay: 600});
     slow.save('a', {n: 1});
-    await sleep(120);
+    await sleep(300);
     slow.save('a', {n: 2});
-    await sleep(130);
+    await sleep(400);
     t.check(!exists(`${slowDir}/a.json`), 'a save made during the wait restarts it');
-    await sleep(250);
+    await sleep(500);
     t.eq(readText(`${slowDir}/a.json`), '{"n":2}', 'and the latest object is written once the wait is over');
     slow.destroy();
 
