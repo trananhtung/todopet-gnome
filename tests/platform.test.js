@@ -4,7 +4,7 @@
 import GLib from 'gi://GLib';
 
 import {Prefs} from '../extension/core/prefs.js';
-import {CalendarSource, ServerEvents, dayBounds, widenRange} from '../extension/services/calendar.js';
+import {CalendarSource, ServerEvents, dayBounds, planTimeRange} from '../extension/services/calendar.js';
 import {BROWSER_APP_IDS, FocusWatch, isBrowserWindow} from '../extension/services/focusWatch.js';
 import {IdleWatch} from '../extension/services/idle.js';
 import {CHIME_SOUNDS, playChime, shouldPlay} from '../extension/services/sound.js';
@@ -229,18 +229,37 @@ function serverEvents(t) {
     t.check(!cache.add([]), 'an empty batch is no change');
 }
 
+// The calendar server has one window for all of its clients and the top bar calendar sets it to the month grid
+// it shows: planTimeRange never sends a window that drops any part of the current one (ruling R11).
 function serverWindow(t) {
     const day = [sec(2026, 10, 28, 0), sec(2026, 10, 29, 0)];
-    t.eq(widenRange(day, null), {since: day[0], until: day[1], changed: true}, 'no window yet: ask for the day');
-    t.eq(widenRange(day, [0, 0]), {since: day[0], until: day[1], changed: true}, 'an empty window counts as none');
-    // The shell's month grid (Sep 28 - Nov 8) already covers today: nothing to change.
-    const month = [sec(2026, 9, 28, 0), sec(2026, 11, 8, 0)];
-    t.eq(widenRange(day, month), {since: month[0], until: month[1], changed: false}, 'a window that covers the day stays');
-    // The shell shows December: keep its window and add today, so its calendar keeps its events.
-    const december = [sec(2026, 11, 30, 0), sec(2027, 1, 11, 0)];
-    t.eq(widenRange(day, december), {since: day[0], until: december[1], changed: true}, 'widened to cover both');
-    const far = [sec(2027, 6, 1, 0), sec(2027, 7, 12, 0)];
-    t.eq(widenRange(day, far), {since: day[0], until: day[1], changed: true}, 'too far away: only the day');
+    for (const needsLoad of [false, true]) {
+        t.eq([planTimeRange(day, null, needsLoad), planTimeRange(day, [0, 0], needsLoad)], [null, null],
+            `no window yet: no call, wait for the top bar calendar to ask (needsLoad ${needsLoad})`);
+    }
+    // The shell's grid for October (Sep 27 - Nov 8) already covers today.
+    const october = [sec(2026, 9, 27, 0), sec(2026, 11, 8, 0)];
+    t.eq(planTimeRange(day, october, false), null, 'a window that covers today: no call');
+    t.eq(planTimeRange(day, october, true), {since: october[0], until: october[1], force: true},
+        'nothing loaded yet: reload the same window');
+    // The shell shows December (Nov 29 - Jan 10): keep its window and add today (74 days in all).
+    const december = [sec(2026, 11, 29, 0), sec(2027, 1, 10, 0)];
+    for (const needsLoad of [false, true]) {
+        t.eq(planTimeRange(day, december, needsLoad), {since: day[0], until: december[1], force: false},
+            `today outside the window: the union, no forced reload (needsLoad ${needsLoad})`);
+    }
+    // The shell shows January (Dec 27 - Feb 7): the union would span 102 days. Never narrow to today instead.
+    const january = [sec(2026, 12, 27, 0), sec(2027, 2, 7, 0)];
+    for (const needsLoad of [false, true]) {
+        t.eq(planTimeRange(day, january, needsLoad), null,
+            `union over 100 days: no call, the shell's window stays (needsLoad ${needsLoad})`);
+    }
+    // Whatever the window, a planned call covers all of it and today.
+    for (const current of [october, december, [day[0] + 3600, day[1] - 3600], [day[0] - 86400, day[0] + 60]]) {
+        const plan = planTimeRange(day, current, true);
+        t.check(plan && plan.since <= Math.min(day[0], current[0]) && plan.until >= Math.max(day[1], current[1]),
+            `the planned window covers today and ${current.join('..')}`);
+    }
 }
 
 async function calendarSource(t) {

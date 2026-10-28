@@ -11,8 +11,9 @@
 // may have changed.
 //
 // The calendar server has a single time window for all of its clients (properties Since/Until), and the top
-// bar calendar sets it to the month it shows. So this source never shrinks the window: it only widens it to
-// cover today (widenRange), and only when it does not already.
+// bar calendar sets it to the month grid it shows. So this source never sends a window that drops any part of
+// the current one (planTimeRange): it widens it to also cover today when that stays small, and otherwise
+// leaves it alone and keeps what it has (the top bar calendar asks for the current month again when it opens).
 //
 // Imports only GLib, Gio and plain-JS files (ECal is imported dynamically), so plain gjs can load it.
 import GLib from 'gi://GLib';
@@ -26,7 +27,7 @@ import {demoEvents} from './demo.js';
 const REFRESH_SECONDS = 10 * 60;
 const DAY_MS = 86_400_000;
 // The window is widened to cover today only while the result spans at most this many days; further away
-// (the top bar calendar showing some month far from now) only today is asked for.
+// (the top bar calendar showing some month far from now) no call is made at all.
 const MAX_WINDOW_DAYS = 100;
 // ECal: how long a calendar backend may take to come online, and when to give up waiting for instances.
 const ECAL_CONNECT_SECONDS = 10;
@@ -74,19 +75,25 @@ export function dayBounds(date) {
 const overlapsDay = (e, [start, end]) => e.start.getTime() < end.getTime() && e.end.getTime() > start.getTime();
 const byStart = (a, b) => a.start.getTime() - b.start.getTime();
 
-// The calendar server window to ask for so that it covers `day` ([since, until] in epoch seconds) without
-// dropping the window someone else asked for (`current`, null or [0, 0] when there is none yet).
-// Returns {since, until, changed}; `changed` is false when `current` already covers the day.
-export function widenRange(day, current) {
-    const [since, until] = day;
+// The SetTimeRange call that gets us `today`'s events ([since, until] in epoch seconds) from the calendar
+// server, or null for no call. `current` is the server's window ([Since, Until]; null or [0, 0] when nobody
+// asked yet); `needsLoad` says we hold nothing yet. A planned window always contains all of `current`.
+//   - no window yet: no call. The top bar calendar asks for its month as soon as the server appears, and
+//     the reload that causes reaches us too.
+//   - the window covers today: no call, unless nothing was loaded yet; then the same window, force_reload,
+//     because the server sent its events before we listened.
+//   - otherwise the union of both, when it spans at most MAX_WINDOW_DAYS (a new window makes the server send
+//     everything, no force needed); no call when it would be wider.
+export function planTimeRange(today, current, needsLoad) {
     if (!current || !(current[1] > current[0]))
-        return {since, until, changed: true};
+        return null;
+    const [since, until] = today;
     if (current[0] <= since && current[1] >= until)
-        return {since: current[0], until: current[1], changed: false};
-    const wide = {since: Math.min(since, current[0]), until: Math.max(until, current[1])};
-    if ((wide.until - wide.since) * 1000 > MAX_WINDOW_DAYS * DAY_MS)
-        return {since, until, changed: true};
-    return {...wide, changed: true};
+        return needsLoad ? {since: current[0], until: current[1], force: true} : null;
+    const union = {since: Math.min(since, current[0]), until: Math.max(until, current[1])};
+    if ((union.until - union.since) * 1000 > MAX_WINDOW_DAYS * DAY_MS)
+        return null;
+    return {...union, force: false};
 }
 
 // The events the calendar server sent, by id. Ids are "<source uid>\n<event uid>\n<recurrence id>"; the
@@ -186,8 +193,7 @@ class ServerBackend {
         this._cancellable = new Gio.Cancellable();
         this._proxy = null;
         this._proxyIds = [];
-        // True until the server has sent its events once since it appeared: then a window that already covers
-        // today is reloaded instead of left alone, because the events it holds were sent before we listened.
+        // True until we asked the server for its events once since it appeared (see planTimeRange).
         this._needsLoad = true;
     }
 
@@ -237,24 +243,22 @@ class ServerBackend {
         return {owner: proxy.g_name_owner !== null, since: prop('Since'), until: prop('Until'), hasCalendars: prop('HasCalendars')};
     }
 
-    // Asks the server for today's events when its window does not cover today (or when nothing was loaded yet).
+    // Asks the server for today's events when needed, never dropping any of its current window (planTimeRange).
+    // Also runs whenever the window changes (g-properties-changed) and when the server appears.
     refresh() {
         const proxy = this._proxy;
         if (!proxy || proxy.g_name_owner === null)
             return;
         const today = dayBounds(new Date());
         this._events.prune(today[0]);
-        const [start, end] = today.map(d => Math.floor(d.getTime() / 1000));
         const info = this.info();
         const current = info.since !== null && info.until !== null ? [info.since, info.until] : null;
-        const range = widenRange([start, end], current);
-        if (!range.changed && !this._needsLoad)
+        const plan = planTimeRange(today.map(d => Math.floor(d.getTime() / 1000)), current, this._needsLoad);
+        if (!plan)
             return;
-        // force_reload only when the window stays as it is: a new window makes the server send everything anyway.
-        const force = !range.changed;
         this._needsLoad = false;
         const cancellable = this._cancellable;
-        proxy.call('SetTimeRange', new GLib.Variant('(xxb)', [range.since, range.until, force]),
+        proxy.call('SetTimeRange', new GLib.Variant('(xxb)', [plan.since, plan.until, plan.force]),
             Gio.DBusCallFlags.NONE, -1, cancellable, (p, result) => {
                 try {
                     p.call_finish(result);
@@ -268,7 +272,8 @@ class ServerBackend {
     }
 
     _onOwner() {
-        // The server (re)started or went away: what we hold is stale either way.
+        // The server (re)started or went away: what we hold is stale either way. The proxy has already read the
+        // new server's properties; while it has no window yet, refresh() waits for g-properties-changed.
         this._events.clear();
         this._needsLoad = true;
         this._onChanged();
