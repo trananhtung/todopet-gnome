@@ -1,4 +1,5 @@
 // Test doubles shared by the test modules. Later tasks add to this file.
+import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
 
 const copy = value => JSON.parse(JSON.stringify(value));
@@ -54,4 +55,28 @@ export class MemoryFiles {
 // A new, empty directory under the system temp directory; returns its path. The caller removes it.
 export function tmpDir() {
     return GLib.dir_make_tmp('todopet-test-XXXXXX');
+}
+
+// Deletes a directory and everything in it (tests only: it blocks). A path that is not there is fine.
+export function rmTree(path) {
+    const file = Gio.File.new_for_path(path);
+    if (!file.query_exists(null))
+        return;
+    if (file.query_file_type(Gio.FileQueryInfoFlags.NOFOLLOW_SYMLINKS, null) === Gio.FileType.DIRECTORY) {
+        const children = file.enumerate_children('standard::name', Gio.FileQueryInfoFlags.NOFOLLOW_SYMLINKS, null);
+        for (let info = children.next_file(null); info; info = children.next_file(null))
+            rmTree(file.get_child(info.get_name()).get_path());
+        children.close(null);
+    }
+    file.delete(null);
+}
+
+// Resolves after `ms` milliseconds of the GLib main loop, which is what lets Gio's async calls and timeouts run.
+export function sleep(ms) {
+    return new Promise(resolve => {
+        GLib.timeout_add(GLib.PRIORITY_DEFAULT, ms, () => {
+            resolve();
+            return GLib.SOURCE_REMOVE;
+        });
+    });
 }

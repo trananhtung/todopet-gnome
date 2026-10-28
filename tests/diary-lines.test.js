@@ -8,7 +8,8 @@ import {Mood} from '../extension/core/mood.js';
 import {Stage} from '../extension/core/life.js';
 import {LOG_KINDS, LogSummary, PetLog, logLine} from '../extension/core/diary.js';
 import {Lines, setLinesRandom} from '../extension/core/lines.js';
-import {MemoryFiles, MemoryStore, tmpDir} from './helpers.js';
+import {DiaryFiles} from '../extension/services/store.js';
+import {MemoryFiles, MemoryStore, rmTree, tmpDir} from './helpers.js';
 
 const MINUTE = 60_000;
 const DAY = 86_400_000;
@@ -343,6 +344,49 @@ async function diaryTests(t) {
     quiet.add('bubble', 'x', {now: t0});
     await quiet.flush();
     t.check(quiet.today.length === 1 && hasty.length === 1 && hasty[0] === 'sync failure', 'add never throws because of the files');
+
+    // --- DevTools.swift "Pet diary", on disk: DiaryFiles in a temp folder ---
+    const diskDir = tmpDir();
+    try {
+        const oldDay = dayKey(new Date(t0.getTime() - 20 * DAY));
+        GLib.file_set_contents(`${diskDir}/${oldDay}.jsonl`, '{}\n');
+        const onDisk = await PetLog.open({files: new DiaryFiles(diskDir), now: t0});
+        onDisk.add('bubble', '“Viết báo cáo” — vì 45 phút', {now: t0});
+        onDisk.add('response', 'Bạn bấm “Để sau”', {tag: 'picked', now: at(30)});
+        await onDisk.flush();
+        const fromDisk = await PetLog.open({files: new DiaryFiles(diskDir), now: t0});
+        t.eq(fromDisk.today.map(e => e.text), ['“Viết báo cáo” — vì 45 phút', 'Bạn bấm “Để sau”'],
+            'diary saved to disk and read back');
+        t.check(!GLib.file_test(`${diskDir}/${oldDay}.jsonl`, GLib.FileTest.EXISTS), 'diary files older than 14 days removed');
+        const exported = PetLog.exportText(fromDisk.today, dayKey(t0));
+        t.check(exported.startsWith('TodoPet') && exported.includes('💬 “Viết báo cáo”'), 'diary export for copying');
+
+        // The file on disk is what the in-memory test files hold: one JSON line per entry in <day>.jsonl.
+        const [, bytes] = GLib.file_get_contents(`${diskDir}/2026-10-25.jsonl`);
+        const diskLines = new TextDecoder().decode(bytes).split('\n');
+        t.check(diskLines.length === 3 && diskLines[2] === '' && JSON.parse(diskLines[1]).tag === 'picked',
+            'the day file holds one JSON line per entry');
+        t.eq(await fromDisk.days(), ['2026-10-25'], 'days lists the day files on disk');
+        fromDisk.add('bubble', 'tomorrow', {now: at(86_400)});
+        await fromDisk.flush();
+        t.eq(await fromDisk.days(), ['2026-10-26', '2026-10-25'], 'a new day gets its own file');
+        t.eq((await fromDisk.load('2026-10-25')).length, 2, 'and load reads an older day from disk');
+    } finally {
+        rmTree(diskDir);
+    }
+
+    // The diary folder is made on the first write.
+    const lateRoot = tmpDir();
+    try {
+        const late = await PetLog.open({files: new DiaryFiles(`${lateRoot}/log`), now: t0});
+        t.check(!GLib.file_test(`${lateRoot}/log`, GLib.FileTest.EXISTS), 'opening the diary does not make the folder yet');
+        late.add('system', 'hello', {now: t0});
+        await late.flush();
+        t.eq((await PetLog.open({files: new DiaryFiles(`${lateRoot}/log`), now: t0})).today.map(e => e.text), ['hello'],
+            'the first entry makes the folder and is kept');
+    } finally {
+        rmTree(lateRoot);
+    }
 
     // --- Export ---
     const exp = [

@@ -11,6 +11,7 @@ const TESTS = [
     './life.test.js',
     './planning.test.js',
     './diary-lines.test.js',
+    './store.test.js',
 ];
 
 const t = new T();
