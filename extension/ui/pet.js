@@ -27,6 +27,7 @@ import {Emitter} from '../core/emitter.js';
 import {Mood} from '../core/mood.js';
 import {loopMode} from './frameRate.js';
 import {petSize} from './geometry.js';
+import {focusText} from './indicatorLogic.js';
 import {PetWalker} from './walker.js';
 
 export {clampToWorkArea, groundY} from './geometry.js';
@@ -407,8 +408,7 @@ export class PetActor extends Emitter {
         let text = null;
         let styleClass = 'todopet-pet-chip';
         if (session) {
-            const left = Math.max(0, Math.trunc((session.end.getTime() - Date.now()) / 1000));
-            text = `${session.isBreak ? '☕' : '🍅'} ${Math.trunc(left / 60)}:${String(left % 60).padStart(2, '0')}`;
+            text = focusText(session, Date.now());
         } else if (brain?.flow) {
             text = '🎧';
             styleClass = 'todopet-pet-chip todopet-pet-chip-flow';

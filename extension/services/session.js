@@ -74,5 +74,7 @@ export class SessionWatch extends Emitter {
         if (this._modeId !== 0)
             Main.sessionMode.disconnect(this._modeId);
         this._modeId = 0;
+        // A module outlives disable(): do not keep the interface description.
+        logindInfo = null;
     }
 }

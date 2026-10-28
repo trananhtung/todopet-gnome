@@ -101,6 +101,13 @@ function drawFireworks(cr, bursts, t, golden) {
 // Laying text out is the slow part of the badge: the last one is kept (one badge on screen at a time).
 let badgeCache = null; // {key, flame, number}
 
+// Drops the kept layouts. App.stop() calls this: a module outlives disable(), so nothing may stay in it.
+export function clearBadgeCache() {
+    badgeCache = null;
+}
+
+export const badgeCached = () => badgeCache !== null;
+
 function badgeLayouts(text, px) {
     const key = `${text}|${px}`;
     if (badgeCache?.key === key)

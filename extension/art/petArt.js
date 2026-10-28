@@ -1312,6 +1312,14 @@ function signText(text) {
 // same sign again and again; one entry is enough, as one sign is on screen at a time.
 let signCache = null;
 
+// Empties every cache of this module (the glyph outlines, the emoji layouts and the last sign). The caches hold Cairo
+// paths and Pango layouts, and a module outlives disable(): App.stop() calls this so nothing stays behind.
+export function clearArtCaches() {
+    glyphs.clear();
+    emojiLayouts.clear();
+    signCache = null;
+}
+
 // The sign for `text`, laid out: its layouts, the board's size and the whole sign's size (with the margin and the
 // rope). The same text gives back the same (shared, read-only) object until another text is laid out.
 export function signGeometry(text) {

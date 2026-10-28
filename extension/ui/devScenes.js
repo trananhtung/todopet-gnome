@@ -7,9 +7,13 @@
 import Clutter from 'gi://Clutter';
 import GLib from 'gi://GLib';
 import Gio from 'gi://Gio';
+import GObject from 'gi://GObject';
+import Meta from 'gi://Meta';
 import Shell from 'gi://Shell';
 import St from 'gi://St';
+import * as Signals from 'resource:///org/gnome/shell/misc/signals.js';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
+import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js';
 
 import {LogSummary, PetLog} from '../core/diary.js';
 import {dayKey} from '../core/dates.js';
@@ -20,6 +24,8 @@ import {ClaudeError} from '../services/claude.js';
 import {hasSpeech} from '../services/speech.js';
 import {signFrame} from './anticsLogic.js';
 import {rectsOverlap} from './bubbleLogic.js';
+import {menuModel} from './indicator.js';
+import {indicatorLabel} from './indicatorLogic.js';
 import {diaryRows, folderURI, stuckLine, templateSteps} from './viewsLogic.js';
 
 Gio._promisify(Gio.File.prototype, 'replace_async', 'replace_finish');
@@ -125,9 +131,23 @@ function reportSceneError(id, error) {
     console.error(`TODOPET SCENE ERROR ${id}: ${message}`);
 }
 
+// True once the scenes of this process were started. A module outlives the extension, so an App that is started again
+// (a scene turning the extension off and on) does not play them again.
+let started = false;
+
 // Plays `ids` in order. A failing scene is reported and the next one still runs. Returns false when it was
-// cancelled before the end (App.stop()); otherwise logs `TODOPET SCENES DONE` and terminates the shell.
+// cancelled before the end (App.stop()) or when the scenes of this process were already started; otherwise logs
+// `TODOPET SCENES DONE` and terminates the shell.
+//
+// ctx = {app, arg, wait(ms), shot(name), stopApp(), startApp(), restartedBy(trigger)}. `app` is always the App that is
+// running now: a scene can turn the extension off (stopApp) and on again (startApp, which resolves when the new App
+// has started), or make it restart itself (restartedBy), and the scenes go on with it. Only a scene may do that:
+// App.stop() would otherwise cancel the run.
 export async function runScenes(app, ids, dir, cancellable = new Gio.Cancellable()) {
+    if (started)
+        return false;
+    started = true;
+    let current = app;
     try {
         await whenStartupComplete(cancellable);
         for (const id of ids) {
@@ -138,7 +158,9 @@ export async function runScenes(app, ids, dir, cancellable = new Gio.Cancellable
                 continue;
             }
             const ctx = {
-                app,
+                get app() {
+                    return current;
+                },
                 arg: rest.join(':'),
                 wait: ms => sleep(ms, cancellable),
                 async shot(shotName) {
@@ -149,6 +171,37 @@ export async function runScenes(app, ids, dir, cancellable = new Gio.Cancellable
                     if (cancellable.is_cancelled())
                         throw new SceneCancelled();
                     await writeScreenshot(`${dir}/${shotName}.png`);
+                },
+                // disable(): the App stops, but the run is let go of first so that its stop() does not cancel it.
+                stopApp() {
+                    current.releaseScenes();
+                    current.extension.disable();
+                },
+                // For a scene that makes the extension restart itself (the menu's demo switch): `trigger()` does it, and
+                // the scenes go on with the App that replaces the old one.
+                async restartedBy(trigger) {
+                    const old = current;
+                    const {extension} = old;
+                    old.releaseScenes();
+                    trigger();
+                    for (let waited = 0; (!extension.app || extension.app === old) && waited < 5000; waited += 50)
+                        await sleep(50, cancellable);
+                    const next = extension.app;
+                    if (!next || next === old)
+                        throw new Error('the extension did not restart');
+                    next.adoptScenes(cancellable);
+                    await next.whenStarted;
+                    current = next;
+                },
+                // enable(): a new App, which is given the run (so that stopping it cancels the run) and which does not
+                // play the scenes again. Resolves when it has started.
+                async startApp() {
+                    const {extension} = current;
+                    extension.enable();
+                    const next = extension.app;
+                    next.adoptScenes(cancellable);
+                    await next.whenStarted;
+                    current = next;
                 },
             };
             try {
@@ -225,6 +278,10 @@ function mouse() {
         },
         press: () => device.notify_button(now(), Clutter.BUTTON_PRIMARY, Clutter.ButtonState.PRESSED),
         release: () => device.notify_button(now(), Clutter.BUTTON_PRIMARY, Clutter.ButtonState.RELEASED),
+        rightClick() {
+            device.notify_button(now(), Clutter.BUTTON_SECONDARY, Clutter.ButtonState.PRESSED);
+            device.notify_button(now() + 1000, Clutter.BUTTON_SECONDARY, Clutter.ButtonState.RELEASED);
+        },
     };
 }
 
@@ -622,6 +679,13 @@ function keyboard() {
             const now = GLib.get_monotonic_time();
             device.notify_keyval(now, keyval, Clutter.KeyState.PRESSED);
             device.notify_keyval(now + 1000, keyval, Clutter.KeyState.RELEASED);
+        },
+        // A shortcut: the keys go down in order and come up in reverse, like a person's fingers.
+        chord(...keyvals) {
+            const now = GLib.get_monotonic_time();
+            keyvals.forEach((keyval, i) => device.notify_keyval(now + i * 1000, keyval, Clutter.KeyState.PRESSED));
+            [...keyvals].reverse().forEach((keyval, i) =>
+                device.notify_keyval(now + (keyvals.length + i) * 1000, keyval, Clutter.KeyState.RELEASED));
         },
     };
 }
@@ -1503,3 +1567,489 @@ registerScene('grumble', ctx => withPet(ctx, Mood.annoyed, async pet => {
         brain.dismissBubble();
     }
 }));
+
+// --- The top bar item, the shortcut, the lock, the developer trigger, and turning the extension off and on ---
+
+// The actors on the stage (the whole tree) for which `test(actor)` holds.
+function stageActors(test) {
+    const found = [];
+    const walk = actor => {
+        if (test(actor))
+            found.push(actor);
+        for (const child of actor.get_children())
+            walk(child);
+    };
+    walk(global.stage);
+    return found;
+}
+
+const isOurs = actor => (actor.name ?? '').startsWith('todopet');
+
+// Whether the key focus is in the board's add field.
+function addFieldFocused(board) {
+    const focus = global.stage.get_key_focus();
+    return focus === board.addEntry.clutter_text || focus === board.addEntry;
+}
+
+// What the indicator's menu holds right now, as [id or title]: the real menu items, not the model they came from.
+function menuTitles(indicator) {
+    return indicator.menu._getMenuItems().map(item => {
+        if (item instanceof PopupMenu.PopupSeparatorMenuItem)
+            return '---';
+        return item.label?.text ?? '';
+    });
+}
+
+// The menu item whose title is `title`.
+function menuRow(indicator, title) {
+    const row = indicator.menu._getMenuItems().find(item => item.label?.text === title);
+    expect(row, `the menu has no '${title}': ${menuTitles(indicator)}`);
+    return row;
+}
+
+// Opens the menu, uses the item `title` the way a click does (the menu closes, then the item runs) and waits a moment.
+async function useMenuItem(ctx, indicator, title) {
+    indicator.menu.open(false);
+    await ctx.wait(250);
+    expect(indicator.menu.isOpen, 'the menu did not open');
+    menuRow(indicator, title).activate(Clutter.get_current_event());
+    await ctx.wait(250);
+    expect(!indicator.menu.isOpen, `the menu stayed open after '${title}'`);
+}
+
+// The quick menu in the top bar: the label, the items in the macOS order, and each item doing its job. (The demo
+// switch is looked at, not used: switching it rebuilds the whole App.)
+registerScene('menu', ctx => withPet(ctx, Mood.happy, async (pet, pointer) => {
+    const {app} = ctx;
+    const {brain, prefs, board, indicator} = app;
+    expect(indicator && Main.panel.statusArea[app.extension.uuid] === indicator, 'the indicator is not in the top bar');
+    // A pinned mood is a test seam that does not tell the brain's listeners: the label follows on the next change.
+    indicator.update();
+    expect(/^😊 \d+\/\d+$/.test(indicator.labelText), `the label says '${indicator.labelText}'`);
+    expect(indicator.labelText === indicatorLabel(brain, Date.now()), 'the label is not the brain\'s');
+    console.log(`TODOPET menu label '${indicator.labelText}'`);
+
+    // A click on the item opens the menu.
+    await click(ctx, pointer, indicator);
+    await ctx.wait(400);
+    expect(indicator.menu.isOpen, 'a click on the item did not open the menu');
+    const ids = indicator.model.map(item => item.id);
+    console.log(`TODOPET menu items ${menuTitles(indicator).join(' | ')}`);
+    expect(ids.join() === 'header,separator,open,add,startFocus,separator,callOver,hide,quiet,refresh,diary,separator,settings,demo',
+        `the menu items: ${ids}`);
+    const expected = indicator.model.map(item => (item.id === 'separator' ? '---' : item.title));
+    expect(menuTitles(indicator).join('|') === expected.join('|'), `the menu shows ${menuTitles(indicator)}`);
+    expect(menuRow(indicator, indicator.model[0].title).sensitive === false, 'the header is not greyed out');
+    const demo = indicator.menu._getMenuItems().at(-1);
+    expect(demo instanceof PopupMenu.PopupSwitchMenuItem && demo.state === true, 'the demo switch is not on');
+    await ctx.shot('menu');
+    indicator.menu.close(false);
+    await ctx.wait(300);
+
+    // Quiet for an hour, and back.
+    await useMenuItem(ctx, indicator, indicator.model.find(i => i.id === 'quiet').title);
+    expect(brain.quietUntil && Math.abs(brain.quietUntil.getTime() - Date.now() - 3600 * 1000) < 5000 &&
+        prefs.quietUntil === brain.quietUntil.getTime(), `reminders are not quiet for an hour: ${brain.quietUntil}`);
+    indicator.menu.open(false);
+    await ctx.wait(250);
+    expect(menuModel(app).some(i => i.id === 'unquiet') && !menuModel(app).some(i => i.id === 'quiet'),
+        'a quiet pet does not offer "Resume reminders"');
+    indicator.menu.close(false);
+    await useMenuItem(ctx, indicator, menuModel(app).find(i => i.id === 'unquiet').title);
+    expect(brain.quietUntil === null && prefs.quietUntil === 0, 'the reminders did not come back');
+
+    // Hide for an hour: the pet and the board go and stay away; the menu then offers to show it and to call it over.
+    board.open();
+    await ctx.wait(300);
+    expect(board.isOpen, 'the board did not open');
+    await useMenuItem(ctx, indicator, menuModel(app).find(i => i.id === 'hide').title);
+    console.log(`TODOPET menu hidden: pet=${pet.visible} board=${board.isOpen} until +${Math.round((prefs.hiddenUntil - Date.now()) / 1000)} s`);
+    expect(!pet.visible && !board.isOpen, 'hiding the pet left it or its board on screen');
+    expect(Math.abs(prefs.hiddenUntil - Date.now() - 3600 * 1000) < 5000, 'the pet is not hidden for an hour');
+    await ctx.wait(1500);
+    expect(!pet.visible, 'the tick showed the pet again');
+    indicator.menu.open(false);
+    await ctx.wait(250);
+    const hiddenIds = menuModel(app).map(i => i.id);
+    expect(hiddenIds.includes('show') && hiddenIds.includes('callOver') && !hiddenIds.includes('hide'),
+        `a hidden pet's menu: ${hiddenIds}`);
+    indicator.menu.close(false);
+    await useMenuItem(ctx, indicator, menuModel(app).find(i => i.id === 'show').title);
+    expect(pet.visible && prefs.hiddenUntil === 0, 'the pet did not come back');
+
+    // "Call Mochi over" works on a hidden pet too: it clears the hiding first, or the tick would hide it again.
+    app.hidePet(3600 * 1000);
+    await ctx.wait(300);
+    expect(!pet.visible, 'the pet did not hide');
+    await useMenuItem(ctx, indicator, menuModel(app).find(i => i.id === 'callOver').title);
+    // It drops in at the middle (the fall takes about half a second; it walks on once it has landed).
+    const area = pet.workArea;
+    console.log(`TODOPET menu called over: pet=${pet.visible} until=${prefs.hiddenUntil} ${describePet(pet)}`);
+    expect(pet.visible && prefs.hiddenUntil === 0, 'calling the pet over did not bring it back');
+    expect(Math.abs(pet.frame.x + pet.frame.width / 2 - (area.x + area.width / 2)) < 2, 'the pet is not in the middle');
+    await ctx.wait(1500);
+    expect(pet.visible, 'the tick hid the pet again');
+
+    // Add a task: the board opens with the cursor in its field. The diary: the board opens on the diary page.
+    await useMenuItem(ctx, indicator, menuModel(app).find(i => i.id === 'add').title);
+    await ctx.wait(400);
+    expect(board.isOpen && addFieldFocused(board), 'Add a task did not open the board with the field focused');
+    board.close();
+    await useMenuItem(ctx, indicator, menuModel(app).find(i => i.id === 'diary').title);
+    await ctx.wait(400);
+    expect(board.isOpen && board.pageKind === 'diary', `the diary item opened '${board.pageKind}'`);
+    board.close();
+
+    // The settings are the extension's preferences window (not opened for real here).
+    const opened = [];
+    await withStub(app.extension, 'openPreferences', () => opened.push('prefs'), async () => {
+        await useMenuItem(ctx, indicator, menuModel(app).find(i => i.id === 'settings').title);
+    });
+    expect(opened.length === 1, `Settings opened the preferences ${opened.length} times`);
+
+    // A focus session: the label is the clock and counts down, from a single timer; stopping puts the mood back.
+    await useMenuItem(ctx, indicator, menuModel(app).find(i => i.id === 'startFocus').title);
+    expect(brain.focusSession !== null, 'the focus session did not start');
+    const first = indicator.labelText;
+    await ctx.wait(2200);
+    const later = indicator.labelText;
+    console.log(`TODOPET menu focus label '${first}' -> '${later}'`);
+    expect(/^🍅 2[45]:\d\d$/.test(first) && /^🍅 2[45]:\d\d$/.test(later) && first !== later, `the clock: '${first}' -> '${later}'`);
+    expect(menuModel(app).some(i => i.id === 'stopFocus') && !menuModel(app).some(i => i.id === 'startFocus'),
+        'during focus the menu offers to stop it');
+    await useMenuItem(ctx, indicator, menuModel(app).find(i => i.id === 'stopFocus').title);
+    expect(brain.focusSession === null && /^😊 \d+\/\d+$/.test(indicator.labelText),
+        `after stopping, the label says '${indicator.labelText}'`);
+    brain.dismissBubble();
+
+    // A right click on the pet opens the same menu there (Swift: pet.hit.onRightClick); its items work the same.
+    await untilOnGround(ctx, pet);
+    pet.paused = true;
+    await ctx.wait(700);
+    const {x, y, width, height} = pet.frame;
+    pointer.moveTo(x + width / 2, y + height * 0.6);
+    await ctx.wait(300);
+    pointer.rightClick();
+    await ctx.wait(600);
+    const petMenu = app.petMenu.menu;
+    const petItems = petMenu._getMenuItems().map(item => (item instanceof PopupMenu.PopupSeparatorMenuItem ? '---' : item.label?.text));
+    console.log(`TODOPET menu pet menu open=${app.petMenu.isOpen} items ${petItems.join(' | ')}`);
+    const wanted = menuModel(app).map(item => (item.id === 'separator' ? '---' : item.title));
+    expect(app.petMenu.isOpen && petItems.join('|') === wanted.join('|'), `the pet's menu: ${petItems}`);
+    const box = petMenu.actor.get_transformed_extents?.() ?? null;
+    expect(box && box.get_y() + box.get_height() <= y + height, 'the menu is not above the pet');
+    await ctx.shot('menu-pet');
+    petMenu._getMenuItems().find(item => item.label?.text === menuModel(app).find(i => i.id === 'hide').title).activate(null);
+    await ctx.wait(300);
+    expect(!app.petMenu.isOpen && !pet.visible, 'Hide pet for 1 hour from the pet\'s menu did not hide the pet');
+    app.showPet();
+    await ctx.wait(300);
+    expect(pet.visible, 'the pet did not come back');
+}));
+
+// Locks the screen without the lock screen: the session watcher says so, as it does when the shell enters it.
+function setLocked(app, locked) {
+    app.session.locked = locked;
+    app.session.emit('lock-changed', locked);
+}
+
+// While the screen is locked nothing of ours is on screen: not the pet, its stunts and sign, its bubble, the board
+// or the top bar item, and the board will not open. Everything comes back when it unlocks. A board that was open while
+// the pet was hidden (it stays, in the corner) closes too.
+registerScene('locked', ctx => withPet(ctx, Mood.angry, async pet => {
+    const {app} = ctx;
+    const {brain, prefs, board, antics, indicator} = app;
+    const modals = modalBefore();
+
+    // The board opened while the pet is away is shut by the lock, whether or not the pet was on screen.
+    prefs.hiddenUntil = Date.now() + 3600 * 1000;
+    await ctx.wait(300);
+    board.open();
+    await ctx.wait(400);
+    expect(board.isOpen && board.side === 'corner', `the board did not open in the corner: ${board.side}`);
+    setLocked(app, true);
+    await ctx.wait(300);
+    expect(!board.isOpen && Main.modalCount === modals, `the board stayed open on the lock screen (${Main.modalCount} modals)`);
+    board.open({focusAdd: true});
+    app.openDiary();
+    await ctx.wait(300);
+    expect(!board.isOpen && Main.modalCount === modals, 'the board opened while locked');
+    setLocked(app, false);
+    prefs.hiddenUntil = 0;
+    await ctx.wait(500);
+    expect(pet.visible && !brain.locked, 'the pet did not come back');
+
+    // A parade with its sign, and its bubble.
+    brain.devAntic('parade');
+    await ctx.wait(1000);
+    console.log(`TODOPET locked before: pet=${pet.visible} antic=${antics.playing} sign=${Boolean(antics.sign)} ` +
+        `bubble=${app.bubble.visible} indicator=${indicator.container.visible}`);
+    expect(antics.playing === 'parade' && antics.sign && app.bubble.visible, 'the parade is not on screen');
+    setLocked(app, true);
+    await ctx.wait(500);
+    // On screen: an actor of ours that is mapped (the pet menu's hidden anchor and the like stay in the tree).
+    const actors = stageActors(a => isOurs(a) && a.mapped).map(a => a.name);
+    console.log(`TODOPET locked: pet=${pet.visible} antic=${antics.playing} sign=${Boolean(antics.sign)} bubble=${app.bubble.visible} ` +
+        `brain.locked=${brain.locked} indicator=${indicator.container.visible} actors=[${actors}]`);
+    expect(!pet.visible && antics.playing === null && antics.sign === null && antics.layers.length === 0,
+        'the pet or its stunt is still on screen');
+    expect(!app.bubble.visible && brain.bubble === null, 'the bubble is still on screen');
+    expect(brain.locked && !indicator.container.visible, 'the brain does not know, or the top bar item shows');
+    expect(actors.length === 0, `these are still on the stage: ${actors}`);
+    expect(brain.antic === null, 'the brain still has the stunt');
+    app.callPetOver();
+    app.openBoard();
+    await ctx.wait(300);
+    expect(!pet.visible && !board.isOpen, 'calling the pet over or opening the board worked on the lock screen');
+    await ctx.shot('locked');
+
+    setLocked(app, false);
+    await ctx.wait(600);
+    console.log(`TODOPET unlocked: pet=${pet.visible} brain.locked=${brain.locked} indicator=${indicator.container.visible}`);
+    expect(pet.visible && !brain.locked && indicator.container.visible, 'the pet or the top bar item did not come back');
+    board.open();
+    await ctx.wait(300);
+    expect(board.isOpen, 'the board does not open after unlocking');
+    board.close();
+    brain.endAntic();
+    brain.dismissBubble();
+}));
+
+// The `dev-trigger` setting plays a command and goes back to ''; the settings window's `prefs:` values stay.
+registerScene('dev-trigger', ctx => withPet(ctx, Mood.normal, async pet => {
+    const {app} = ctx;
+    const {brain, settings, antics} = app;
+    const trigger = async value => {
+        settings.set_string('dev-trigger', value);
+        await ctx.wait(200);
+    };
+    await untilOnGround(ctx, pet);
+    brain.dismissBubble();
+
+    await trigger('bubble');
+    console.log(`TODOPET dev-trigger bubble: '${brain.bubble?.text}' key='${settings.get_string('dev-trigger')}'`);
+    expect(brain.bubble !== null && app.bubble.visible && settings.get_string('dev-trigger') === '', 'bubble did not say a bubble');
+    brain.dismissBubble();
+
+    await trigger('prefs:Day');
+    await ctx.wait(300);
+    expect(settings.get_string('dev-trigger') === 'prefs:Day', 'a prefs: value was touched');
+    settings.set_string('dev-trigger', '');
+
+    await trigger('parade');
+    console.log(`TODOPET dev-trigger parade: antic=${brain.antic?.kind} playing=${antics.playing} key='${settings.get_string('dev-trigger')}'`);
+    expect(brain.antic?.kind === 'parade' && antics.playing === 'parade' && settings.get_string('dev-trigger') === '',
+        'parade did not start the parade');
+    brain.endAntic();
+    brain.dismissBubble();
+    await ctx.wait(500);
+
+    await trigger('celebrate:spin');
+    console.log(`TODOPET dev-trigger celebrate: ${brain.celebration?.kind} golden=${brain.celebration?.golden}`);
+    expect(brain.celebration?.kind === 'spin' && brain.celebration.golden === false && settings.get_string('dev-trigger') === '',
+        'celebrate:spin did not celebrate a spin');
+    await until(ctx, () => antics.celebrationPlan === null, 7000);
+    expect(antics.celebrationPlan === null, 'the celebration did not go away');
+    await trigger('golden');
+    expect(brain.celebration?.golden === true && settings.get_string('dev-trigger') === '', 'golden did not celebrate a golden treat');
+    await until(ctx, () => antics.celebrationPlan === null, 8000);
+}));
+
+// The menu's demo switch rebuilds the whole App: off, it runs without the demo (no token, so the paw and "Connect
+// Todoist…"); on, with it again. The scenes go on with each new App.
+registerScene('demo-toggle', async ctx => {
+    const flip = async () => {
+        const {indicator} = ctx.app;
+        indicator.menu.open(false);
+        await ctx.wait(300);
+        const row = indicator.menu._getMenuItems().at(-1);
+        expect(row instanceof PopupMenu.PopupSwitchMenuItem, 'the last menu item is not the demo switch');
+        await ctx.restartedBy(() => row.toggle());
+        expect(!indicator.menu.isOpen, 'the old menu is still open');
+        await ctx.wait(1200);
+    };
+    const before = ctx.app;
+    expect(before.brain.demo && before.prefs.demoMode, 'the shell is not in demo mode');
+
+    await flip();
+    const off = ctx.app;
+    const ids = off.indicator.model.map(i => i.id);
+    console.log(`TODOPET demo-toggle off: new app=${off !== before} demo=${off.brain.demo} setting=${off.prefs.demoMode} ` +
+        `hasToken=${off.brain.hasToken} label='${off.indicator.labelText}' menu=${ids}`);
+    expect(off !== before && !off.brain.demo && !off.prefs.demoMode, 'turning the switch off did not rebuild without the demo');
+    expect(off.indicator.labelText === '🐾', `no token: the label says '${off.indicator.labelText}'`);
+    expect(ids.includes('connect') && !ids.includes('add') && !ids.includes('startFocus'), `no token: the menu has ${ids}`);
+    expect(Main.panel.statusArea[off.extension.uuid] === off.indicator && stageActors(a => a.name === 'todopet-pet').length === 1,
+        'the new App has not one pet and its top bar item');
+    off.indicator.menu.open(false);
+    await ctx.wait(400);
+    await ctx.shot('menu-no-token');
+    off.indicator.menu.close(false);
+    await ctx.wait(300);
+    off.brain.dismissBubble();
+
+    await flip();
+    const on = ctx.app;
+    console.log(`TODOPET demo-toggle on: new app=${on !== off} demo=${on.brain.demo} setting=${on.prefs.demoMode} ` +
+        `hasToken=${on.brain.hasToken} label='${on.indicator.labelText}'`);
+    expect(on !== off && on.brain.demo && on.prefs.demoMode && on.brain.hasToken, 'turning the switch on did not rebuild with the demo');
+    expect(on.indicator.labelText !== '🐾', 'the demo has a mood label');
+    on.brain.dismissBubble();
+});
+
+// A signal handler's or timer's origin: the first frame of a stack that is not the probe's own.
+const callerOf = () => (new Error().stack.split('\n')[2] ?? '');
+
+// Wraps GLib's timer functions and the connect() of GObjects and of the shell's JS emitters while it is installed, and
+// remembers the timers and the signal handlers the extension makes (judged by where the call came from: a file of the
+// extension, not this one). Handlers are kept only on the shell's own long-lived objects, which the extension must not
+// leave a handler on: the other objects go away with the extension. live() says which are still there.
+function installLeakProbe(app) {
+    const dir = `/${app.extension.uuid}/`;
+    const ours = where => where.includes(dir) && !where.includes('/ui/devScenes.js');
+    const longLived = [
+        global.display, global.stage, global.workspace_manager, global.window_manager,
+        Main.layoutManager, Main.sessionMode, Main.panel, Main.overview, Main.messageTray,
+        St.Settings.get(), St.ThemeContext.get_for_stage(global.stage), Shell.WindowTracker.get_default(),
+    ];
+    const timers = new Map(); // source id -> where
+    const handlers = []; // {object, signal, id, where}
+    const originals = {};
+
+    for (const name of ['timeout_add', 'timeout_add_seconds', 'idle_add']) {
+        const real = GLib[name];
+        originals[name] = real;
+        const callbackAt = name === 'idle_add' ? 1 : 2;
+        GLib[name] = function (...args) {
+            const where = callerOf();
+            const fn = args[callbackAt];
+            let id = 0;
+            args[callbackAt] = (...rest) => {
+                let keep = false;
+                try {
+                    keep = fn(...rest);
+                } finally {
+                    if (!keep)
+                        timers.delete(id);
+                }
+                return keep;
+            };
+            id = real.apply(GLib, args);
+            if (ours(where))
+                timers.set(id, where);
+            return id;
+        };
+    }
+    const removeReal = GLib.source_remove;
+    originals.source_remove = removeReal;
+    GLib.source_remove = function (id) {
+        timers.delete(id);
+        return removeReal.call(GLib, id);
+    };
+
+    // GObjects: signal_handler_is_connected() tells; the shell's JS emitters keep their connections in a table.
+    const gobjectConnect = GObject.Object.prototype.connect;
+    const emitterConnect = Signals.EventEmitter.prototype.connect;
+    const wrap = (real, emitter) => function (signal, fn) {
+        const where = callerOf();
+        const id = real.call(this, signal, fn);
+        if (ours(where) && longLived.includes(this))
+            handlers.push({object: this, signal, id, where, emitter});
+        return id;
+    };
+    GObject.Object.prototype.connect = wrap(gobjectConnect, false);
+    Signals.EventEmitter.prototype.connect = wrap(emitterConnect, true);
+
+    return {
+        timers: () => [...timers].map(([id, where]) => `${id}@${where}`),
+        handlers: () => handlers
+            .filter(h => (h.emitter ? Boolean(h.object._signalConnections?.[h.id])
+                : GObject.signal_handler_is_connected(h.object, h.id)))
+            .map(h => `${h.signal}@${h.where}`),
+        remove() {
+            Object.assign(GLib, originals);
+            GObject.Object.prototype.connect = gobjectConnect;
+            Signals.EventEmitter.prototype.connect = emitterConnect;
+        },
+    };
+}
+
+// Turns the extension off and on 3 times. Each time off, nothing of ours is left: no actor, no top bar item, no
+// shortcut, no timer and no signal handler on the shell's objects (counted by the probe above; it also has to see
+// some while the extension is on, or it proves nothing). Each time on, there is exactly one pet and one top bar item,
+// and the shortcut opens the board once. The scenes go on with the new App (ctx.stopApp / ctx.startApp).
+registerScene('reenable', async ctx => {
+    const {uuid} = ctx.app.extension;
+    const keys = keyboard();
+    const modals = modalBefore();
+    // A binding is taken by name: adding it again fails while a shortcut is left behind. It is the only way to ask.
+    const schema = ctx.app.settings.settings_schema;
+    const shortcutFree = () => {
+        const settings = new Gio.Settings({settings_schema: schema});
+        const action = Main.wm.addKeybinding('board-hotkey', settings, Meta.KeyBindingFlags.NONE, Shell.ActionMode.NORMAL, () => {});
+        if (action !== Meta.KeyBindingAction.NONE)
+            Main.wm.removeKeybinding('board-hotkey');
+        return action !== Meta.KeyBindingAction.NONE;
+    };
+    const probe = installLeakProbe(ctx.app);
+    // With the extension off, the same number of actors is on the stage and tracked by the layout manager every time:
+    // an actor an App leaves behind would add up over the cycles.
+    const residue = () => [Main.layoutManager.uiGroup.get_n_children(), Main.layoutManager._trackedActors?.length ?? -1];
+    let firstResidue = null;
+    try {
+        for (let cycle = 1; cycle <= 3; cycle++) {
+            ctx.stopApp();
+            await ctx.wait(300);
+            firstResidue ??= residue();
+            const left = stageActors(isOurs).map(a => a.name);
+            const free = shortcutFree();
+            const timers = probe.timers();
+            const handlers = probe.handlers();
+            console.log(`TODOPET reenable cycle ${cycle} off: actors=[${left}] topBar=${Boolean(Main.panel.statusArea[uuid])} ` +
+                `shortcutFree=${free} timers=${timers.length} handlers=${handlers.length} modals=${Main.modalCount} ` +
+                `uiGroup/tracked=${residue()}`);
+            expect(residue().join() === firstResidue.join(), `the stage holds ${residue()} (uiGroup, tracked), ${firstResidue} the first time off`);
+            expect(left.length === 0, `these are left on the stage after disable(): ${left}`);
+            expect(!Main.panel.statusArea[uuid], 'the top bar item is still there');
+            expect(free, 'the board shortcut is still bound');
+            expect(timers.length === 0, `timers left after disable(): ${timers}`);
+            expect(handlers.length === 0, `signal handlers left on the shell's objects after disable(): ${handlers}`);
+            expect(Main.modalCount === modals, `a modal grab is left (${Main.modalCount}, ${modals} before)`);
+
+            await ctx.startApp();
+            await ctx.wait(1500);
+            const {app} = ctx;
+            const pets = stageActors(a => a.name === 'todopet-pet').length;
+            console.log(`TODOPET actors=${pets}`);
+            expect(pets === 1, `${pets} pet actors on the stage, not 1`);
+            expect(app.indicator && Main.panel.statusArea[uuid] === app.indicator, 'the top bar item is not the new App\'s');
+            expect(stageActors(a => a.name === 'todopet-board').length === 0, 'a board is open');
+            const alive = {timers: probe.timers().length, handlers: probe.handlers().length};
+            console.log(`TODOPET reenable cycle ${cycle} on: label='${app.indicator.labelText}' timers=${alive.timers} handlers=${alive.handlers}`);
+            expect(alive.timers > 0 && alive.handlers > 0,
+                `the probe saw ${alive.timers} timers and ${alive.handlers} handlers while on: it sees nothing`);
+
+            // The shortcut opens the board, once, with the cursor in the add field.
+            const opens = [];
+            const open = app.board.open;
+            await withStub(app.board, 'open', options => {
+                opens.push(options);
+                return open.call(app.board, options);
+            }, async () => {
+                keys.chord(Clutter.KEY_Control_L, Clutter.KEY_Super_L, Clutter.KEY_t);
+                await ctx.wait(500);
+            });
+            console.log(`TODOPET reenable cycle ${cycle} shortcut: open calls ${JSON.stringify(opens)} board=${app.board.isOpen}`);
+            expect(opens.length === 1 && opens[0]?.focusAdd === true, `the shortcut called board.open ${opens.length} times`);
+            expect(app.board.isOpen && addFieldFocused(app.board), 'the shortcut did not open the board with the field focused');
+            app.board.close();
+            await ctx.wait(200);
+        }
+        // After the last cycle: one pet, one top bar item.
+        ctx.app.brain.dismissBubble();
+        await ctx.wait(500);
+        await ctx.shot('reenable');
+    } finally {
+        probe.remove();
+    }
+});

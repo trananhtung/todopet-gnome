@@ -23,6 +23,7 @@ const TESTS = [
     './board-logic.test.js',
     './views-logic.test.js',
     './antics.test.js',
+    './indicator-logic.test.js',
 ];
 
 const t = new T();

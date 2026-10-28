@@ -194,9 +194,10 @@ export class Board {
 
     // --- Opening and closing ---
 
+    // Does nothing while the screen is locked: the lock screen shows nothing of ours.
     open({focusAdd = false} = {}) {
         const brain = this._app.brain;
-        if (!this._root || !brain)
+        if (!this._root || !brain || this._app.locked)
             return;
         if (!this._open) {
             // Swift: openBoard takes a bubble away first; a new one waits unless it is urgent (App._onBubble).

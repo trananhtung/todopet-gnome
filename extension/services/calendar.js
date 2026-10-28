@@ -229,6 +229,8 @@ class ServerBackend {
         this._proxyIds = [];
         this._proxy = null;
         this._events.clear();
+        // A module outlives disable(): do not keep the interface description.
+        serverInfo = null;
     }
 
     events(day) {
