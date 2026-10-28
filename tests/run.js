@@ -9,6 +9,7 @@ const TESTS = [
     './models.test.js',
     './mood-calm.test.js',
     './life.test.js',
+    './planning.test.js',
 ];
 
 const t = new T();
