@@ -595,7 +595,8 @@ export class App {
     }
 
     // Plays the scenes listed in `dev-scenes`, if any, in the background (see devScenes.js). Only in the nested
-    // shell: a real session must never run scenes, and they end by terminating the shell.
+    // shell: a real session must never run scenes, and they end by terminating the shell. The release zip leaves
+    // devScenes.js out (`make pack`): then the import fails, that is logged once, and nothing else changes.
     _startDevScenes() {
         if (GLib.getenv('TODOPET_NESTED') !== '1' || this._scenesCancellable)
             return;

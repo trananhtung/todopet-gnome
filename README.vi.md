@@ -283,7 +283,7 @@ make prefs-check   # dựng cửa sổ cài đặt trên màn hình GTK tạm v�
 tools/nested.sh    # chạy mọi cảnh dev trong một GNOME Shell lồng, chạy ngầm, tách biệt; ảnh chụp vào build/nested/shots
 tools/nested.sh board split diary   # hoặc chỉ một số cảnh ('prefs:Day' mở một trang cài đặt)
 make build         # chép tiện ích vào build/todopet@trananhtung.github.io/ và biên dịch schema
-make pack          # tạo file zip của tiện ích trong build/ (cần lệnh gnome-extensions của gói gnome-shell)
+make pack          # tạo file zip của tiện ích trong build/, không kèm các cảnh dev (cần lệnh gnome-extensions của gói gnome-shell)
 ```
 
 `tools/nested.sh` không bao giờ đụng tới phiên làm việc thật của bạn: nó chạy `gnome-shell --headless` riêng với các thư mục `XDG_*` riêng trong `build/nested/`, cài tiện ích vào đó với chế độ demo bật, và không đọc keyring của bạn. Chạy hết các cảnh mất khoảng 4 phút và báo lỗi nếu nhật ký có lỗi JavaScript.

@@ -283,7 +283,7 @@ make prefs-check   # build the settings window on a throw-away GTK display and c
 tools/nested.sh    # play every dev scene in an isolated, headless nested GNOME Shell; screenshots go to build/nested/shots
 tools/nested.sh board split diary   # or only some scenes ('prefs:Day' opens a settings page)
 make build         # copy the extension to build/todopet@trananhtung.github.io/ and compile the schema
-make pack          # build the extension zip in build/ (needs the gnome-extensions command from the gnome-shell package)
+make pack          # build the extension zip in build/, without the dev scenes (needs the gnome-extensions command from the gnome-shell package)
 ```
 
 `tools/nested.sh` never touches your real session: it starts its own `gnome-shell --headless` with its own `XDG_*` directories under `build/nested/`, installs the extension there with demo mode on, and never reads your keyring. It takes about 4 minutes for all scenes and fails if the log contains a JavaScript error.

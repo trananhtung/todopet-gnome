@@ -1,5 +1,6 @@
 UUID       := todopet@trananhtung.github.io
 BUILD_DIR  := build/$(UUID)
+PACK_DIR   := build/pack/$(UUID)
 EXT_DIR    ?= $(HOME)/.local/share/gnome-shell/extensions
 REF_REPO   := https://github.com/trananhtung/todopet
 REF_DIR    := build/ref/todopet
@@ -43,7 +44,13 @@ install: build
 	rm -rf $(EXT_DIR)/$(UUID)
 	cp -R $(BUILD_DIR) $(EXT_DIR)/$(UUID)
 
+# The release zip, made from a copy of the build without the dev-only scene runner (ui/devScenes.js drives a virtual
+# pointer and keyboard and ends the shell; only tools/nested.sh plays it, from `make build`).
 pack: build
-	gnome-extensions pack $(BUILD_DIR) --force --out-dir=build \
+	rm -rf $(PACK_DIR)
+	mkdir -p $(dir $(PACK_DIR))
+	cp -R $(BUILD_DIR) $(PACK_DIR)
+	rm $(PACK_DIR)/ui/devScenes.js
+	gnome-extensions pack $(PACK_DIR) --force --out-dir=build \
 		--extra-source=core --extra-source=services --extra-source=art \
 		--extra-source=ui --extra-source=brain --extra-source=brain.js
