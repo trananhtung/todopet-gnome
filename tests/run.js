@@ -24,6 +24,7 @@ const TESTS = [
     './views-logic.test.js',
     './antics.test.js',
     './indicator-logic.test.js',
+    './settings-spec.test.js',
 ];
 
 const t = new T();

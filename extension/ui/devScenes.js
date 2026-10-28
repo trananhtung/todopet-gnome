@@ -20,6 +20,7 @@ import {dayKey} from '../core/dates.js';
 import {L} from '../core/l10n.js';
 import {Lines} from '../core/lines.js';
 import {Mood} from '../core/mood.js';
+import {rowCount, settingsPages} from '../core/settingsSpec.js';
 import {ClaudeError} from '../services/claude.js';
 import {hasSpeech} from '../services/speech.js';
 import {signFrame} from './anticsLogic.js';
@@ -2052,4 +2053,42 @@ registerScene('reenable', async ctx => {
     } finally {
         probe.remove();
     }
+});
+
+// --- The settings window (prefs.js) ---
+
+// The settings window is another process (org.gnome.Shell.Extensions); its window is the extension's name.
+const prefsWindow = ctx => global.get_window_actors().map(a => a.meta_window)
+    .find(w => w.get_title() === ctx.app.extension.metadata.name && w.get_wm_class() !== null && !w.is_override_redirect()) ?? null;
+
+// `prefs:<Page>` writes `dev-trigger` = 'prefs:<Page>' and opens the settings window; prefs.js shows that page and sets
+// the key back to ''. The shot is `prefs-<page>.png`. `prefs:<Page>:end` scrolls the page to its last row first
+// (`prefs-<page>-end.png`): Day and Developer have more rows than the window shows. A window that never appears fails
+// the scene (the window is another process, so the pictures and the log are the evidence for its content;
+// tools/prefs-check.js builds every page without a display server and counts the rows). The window is closed
+// afterwards, so the next scene opens a fresh one.
+registerScene('prefs', async ctx => {
+    const [page, where = ''] = ctx.arg === '' ? ['General'] : ctx.arg.split(':');
+    const spec = settingsPages().find(p => p.name === page);
+    expect(spec, `there is no settings page '${page}'`);
+    const {settings, extension} = ctx.app;
+    expect(!prefsWindow(ctx), 'a settings window is still open from before');
+    settings.set_string('dev-trigger', `prefs:${ctx.arg === '' ? page : ctx.arg}`);
+    extension.openPreferences();
+    let window = null;
+    for (let waited = 0; !window && waited < 20000; waited += 100) {
+        await ctx.wait(100);
+        window = prefsWindow(ctx);
+    }
+    expect(window, 'the settings window did not open in 20 s');
+    await ctx.wait(3000);
+    const frame = window.get_frame_rect();
+    console.log(`TODOPET prefs ${ctx.arg || page}: window '${window.get_title()}' ${window.get_wm_class()} ${frame.width}x${frame.height} ` +
+        `rows=${rowCount(spec)} dev-trigger='${settings.get_string('dev-trigger')}'`);
+    await ctx.shot(`prefs-${page.toLowerCase()}${where === '' ? '' : `-${where}`}`);
+    expect(settings.get_string('dev-trigger') === '', `the settings window left dev-trigger at '${settings.get_string('dev-trigger')}'`);
+    window.delete(global.get_current_time());
+    for (let waited = 0; prefsWindow(ctx) && waited < 5000; waited += 100)
+        await ctx.wait(100);
+    expect(!prefsWindow(ctx), 'the settings window did not close');
 });

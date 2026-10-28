@@ -5,7 +5,7 @@ REF_REPO   := https://github.com/trananhtung/todopet
 REF_DIR    := build/ref/todopet
 REF_COMMIT := 8573b98
 
-.PHONY: ref build test lint snapshot nested install pack
+.PHONY: ref build test lint snapshot nested prefs-check install pack
 
 # Read-only clone of the Swift app, used as the behavior and visual reference.
 ref:
@@ -32,6 +32,10 @@ snapshot:
 # Runs the isolated nested GNOME Shell and plays the dev scenes (all of them, or ARGS="prefs:General ...").
 nested:
 	tools/nested.sh $(ARGS)
+
+# Builds the settings window (prefs.js) on a throw-away GTK Broadway display and checks its pages, rows and behavior.
+prefs-check: build
+	gjs -m tools/prefs-check.js
 
 # Installs into the current user's GNOME Shell extensions directory (override with EXT_DIR=...).
 install: build
