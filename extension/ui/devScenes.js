@@ -11,11 +11,15 @@ import Shell from 'gi://Shell';
 import St from 'gi://St';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
+import {LogSummary, PetLog} from '../core/diary.js';
+import {dayKey} from '../core/dates.js';
 import {L} from '../core/l10n.js';
 import {Lines} from '../core/lines.js';
 import {Mood} from '../core/mood.js';
+import {ClaudeError} from '../services/claude.js';
 import {hasSpeech} from '../services/speech.js';
 import {rectsOverlap} from './bubbleLogic.js';
+import {diaryRows, folderURI, stuckLine, templateSteps} from './viewsLogic.js';
 
 Gio._promisify(Gio.File.prototype, 'replace_async', 'replace_finish');
 Gio._promisify(Gio.OutputStream.prototype, 'close_async', 'close_finish');
@@ -908,4 +912,384 @@ registerScene('board-hidden', ctx => withBoard(ctx, null, async (board, pet) => 
     }
     await ctx.wait(300);
     expect(pet.visible, 'the pet did not come back');
+}));
+
+// --- The split view, the wardrobe and the diary (ui/splitView.js, ui/wardrobe.js, ui/diary.js) ---
+
+// Runs body() with `object[name]` replaced by `stub`; the real one is back afterwards.
+async function withStub(object, name, stub, body) {
+    const real = object[name];
+    object[name] = stub;
+    try {
+        await body();
+    } finally {
+        object[name] = real;
+    }
+}
+
+// Waits (at most `ms`) until `done()`; the check runs every 100 ms.
+async function until(ctx, done, ms = 3000) {
+    for (let waited = 0; waited <= ms && !done(); waited += 100)
+        await ctx.wait(100);
+}
+
+// A task cut into steps: the stuck task's page opens the way the stuck bubble's "✂️ Split it" opens it. The quick
+// template, adding and removing steps, Ask Claude (off without a key; with one it fails here, the keyring is empty),
+// then Save adds the steps as sub-tasks of the task (the first one on today's plan) and the page closes.
+registerScene('split', ctx => withBoard(ctx, Mood.angry, async (board, pet, pointer) => {
+    const {brain} = ctx.app;
+    board.open();
+    await ctx.wait(800);
+    await brain.settle();
+    // The demo's overdue task is the stuck one (docs/split.png); an earlier scene (board-delete) may have deleted it.
+    const stuck = brain.stuckTasks[0] ?? null;
+    const task = stuck?.task ?? brain.day.today[0];
+    expect(task, 'the demo has no task to split');
+    brain.openBreakdown(task);
+    await ctx.wait(500);
+    expect(board.isOpen && board.pageKind === 'split' && board.view === 'page', `the split page is not up (${board.pageKind})`);
+    const view = board.page.view;
+    console.log(`TODOPET split "${view.model.title}" task "${view.model.task}" stuck "${view.model.stuck}" ` +
+        `ask enabled=${view.model.ask.enabled} hint="${view.model.keyHint}" steps ${view.entries.length}`);
+    expect(view.model.stuck === stuckLine(stuck?.days ?? null) && view.stuckLabel.visible === Boolean(stuck),
+        `the stuck line: ${view.model.stuck}`);
+    expect(view.entries.length === 3 && !view.saveButton.reactive, 'three blank steps, nothing to save yet');
+    expect(!view.askButton.reactive && view.keyHint.visible, 'Ask Claude is on without a key');
+    const f = board.frame;
+    const wa = pet.workArea;
+    expect(f.x >= wa.x && f.y >= wa.y && f.x + f.width <= wa.x + wa.width && f.y + f.height <= wa.y + wa.height,
+        `the board is outside the work area: ${JSON.stringify(f)}`);
+
+    // The quick template, with a real click.
+    await click(ctx, pointer, view.templateButton);
+    await until(ctx, () => !view.filling);
+    const template = templateSteps(task.title);
+    expect(view.entries.map(e => e.get_text()).join('|') === template.join('|'), `the template: ${view.entries.map(e => e.get_text())}`);
+    expect(view.saveButton.reactive, 'a filled template cannot be saved');
+
+    // Add a step, then take it away again.
+    await click(ctx, pointer, view.addStepButton);
+    expect(view.entries.length === 4 && view.entries[3].get_text() === '', 'Add a step did not add a blank step');
+    await click(ctx, pointer, view.removeButtons[3]);
+    expect(view.entries.length === 3, 'the remove button did not take the step away');
+    expect(view.entries.map(e => e.get_text()).join('|') === template.join('|'), 'removing a step changed the others');
+
+    // The steps of docs/split.png.
+    const steps = [
+        L('Mở hộp thư, lọc email của sếp', 'Open the inbox and find the boss\'s email'),
+        L('Ghi 3 ý chính cần trả lời', 'Jot down the 3 points to answer'),
+        L('Viết và gửi bản trả lời ngắn', 'Write and send a short reply'),
+    ];
+    view.setSteps(steps);
+    await until(ctx, () => !view.filling);
+    await ctx.wait(200);
+    board.actor.grab_key_focus();
+    pointer.moveTo(...AWAY);
+    await ctx.wait(300);
+    await ctx.shot('split');
+
+    // Ask Claude needs a key; with one in the settings but none in the keyring it fails and says why.
+    brain.hasClaudeKey = true;
+    brain.emit('changed');
+    await ctx.wait(200);
+    expect(view.askButton.reactive && !view.keyHint.visible, 'a key did not turn Ask Claude on');
+    await click(ctx, pointer, view.askButton);
+    await until(ctx, () => !view.asking);
+    const failure = `⚠️ ${new ClaudeError('noKey').userMessage}`;
+    console.log(`TODOPET split ask says "${view.errorLabel.text}" visible=${view.errorLabel.visible}`);
+    expect(view.errorLabel.visible && view.errorLabel.text === failure, `Ask Claude's error: ${view.errorLabel.text}`);
+    expect(view.entries.map(e => e.get_text()).join('|') === steps.join('|'), 'a failed Ask Claude changed the steps');
+    pointer.moveTo(...AWAY);
+    await ctx.wait(200);
+    await ctx.shot('split-error');
+    brain.hasClaudeKey = false;
+    brain.emit('changed');
+    await ctx.wait(200);
+    expect(!view.askButton.reactive, 'Ask Claude stayed on after the key went');
+
+    // Save: the steps become sub-tasks of the task, the first one for today; the page closes, the board stays.
+    const service = brain.todo;
+    const calls = [];
+    const created = [];
+    const addTask = service.addTask.bind(service);
+    await withStub(service, 'addTask', async args => {
+        calls.push(args);
+        const made = await addTask(args);
+        created.push(made);
+        return made;
+    }, async () => {
+        await click(ctx, pointer, view.saveButton);
+        await until(ctx, () => board.pageKind !== 'split');
+        await brain.settle();
+    });
+    try {
+        console.log(`TODOPET split saved ${JSON.stringify(calls.map(c => [c.content, c.dueString, c.parentId]))} page=${board.pageKind}`);
+        expect(calls.length === 3 && calls.every((c, i) => c.content === steps[i] && c.parentId === task.id), 'the sub-tasks were not added');
+        expect(calls[0].dueString === 'today' && calls[1].dueString === null && calls[2].dueString === null,
+            'only the first step goes on today\'s plan');
+        expect(calls.every(c => c.priority === task.apiPriority), 'the sub-tasks do not take the task\'s priority');
+        expect(board.isOpen && board.pageKind === null && board.view === 'tasks', 'saving did not take the board back to the task list');
+        expect(brain.day.today.some(t => t.title === steps[0] && t.parentId === task.id), 'the first step is not on today\'s plan');
+        await ctx.wait(300);
+        await ctx.shot('split-saved');
+    } finally {
+        // The demo's day is as it was.
+        for (const made of created)
+            await service.delete(made.id);
+        brain.dismissBubble();
+        brain.refreshSoon();
+        await brain.settle();
+    }
+
+    // The delete question and Drop from plan, on a task the brain is not asked to change.
+    const deleted = [];
+    const dropped = [];
+    await withStub(brain, 'delete', t => deleted.push(t.id), () => withStub(brain, 'unplan', t => dropped.push(t.id), async () => {
+        brain.openBreakdown(task);
+        await ctx.wait(400);
+        const page = board.page.view;
+        await click(ctx, pointer, page.deleteButton);
+        console.log(`TODOPET split delete asks "${page.model.confirm?.text}"`);
+        expect(page.confirmButtons && page.model.confirm.text === Lines.confirmDelete(task), 'the delete question is not shown');
+        await ctx.shot('split-confirm');
+        expect(board.handleKey(Clutter.KEY_Escape) && board.isOpen && !page.confirmButtons, 'Escape did not take the question away first');
+        await click(ctx, pointer, page.deleteButton);
+        await click(ctx, pointer, page.confirmButtons.cancel);
+        expect(!page.confirmButtons && deleted.length === 0 && board.pageKind === 'split', 'Cancel deleted the task or left the page');
+        await click(ctx, pointer, page.deleteButton);
+        await click(ctx, pointer, page.confirmButtons.remove);
+        expect(deleted.join() === task.id && board.pageKind === null, `Delete: ${deleted} page=${board.pageKind}`);
+
+        brain.openBreakdown(task);
+        await ctx.wait(400);
+        await click(ctx, pointer, board.page.view.dropButton);
+        expect(dropped.join() === task.id && board.pageKind === null, `Drop from plan: ${dropped} page=${board.pageKind}`);
+
+        brain.openBreakdown(task);
+        await ctx.wait(400);
+        await click(ctx, pointer, board.page.view.backButton);
+        expect(board.pageKind === null && board.isOpen, 'the back button did not go back to the task list');
+    }));
+}));
+
+// The wardrobe, opened with the life bar's button: the pet, five stats, the sticker book and six accessories. Wear and
+// Take off with real clicks (one accessory per slot), and the back button.
+registerScene('wardrobe', ctx => withBoard(ctx, Mood.angry, async (board, pet, pointer) => {
+    const {brain} = ctx.app;
+    board.open();
+    await ctx.wait(800);
+    await brain.settle();
+    await click(ctx, pointer, board.wardrobeButton);
+    expect(board.isOpen && board.pageKind === 'wardrobe' && board.view === 'page', `the wardrobe is not up (${board.pageKind})`);
+    const view = board.page.view;
+    const m = view.model;
+    console.log(`TODOPET wardrobe "${m.title}" stats ${m.stats.map(s => `${s.label}: ${s.value}`).join(' | ')} | ` +
+        `${m.stickers.title} ${m.stickers.stars} | ${m.accessories.map(a => `${a.name}: ${a.status}`).join(' | ')}`);
+    expect(view.rows.length === 6 && m.accessories.map(a => a.owned).join() === 'true,true,false,true,false,false',
+        'the demo pet does not own the bow, the scarf and the top hat');
+    expect(view.rows.map(r => r.button.visible).join() === 'true,true,false,true,false,false', 'only the unlocked ones have a button');
+    expect(view.petActor.mapped, 'the pet is not on screen');
+    expect(view.stickerLabels.stars.text === '🌟🌟🌟', 'the sticker book does not show three stars');
+    expect(brain.life.state.wearing.join() === 'scarf', `the demo pet wears ${brain.life.state.wearing}`);
+    const f = board.frame;
+    const wa = pet.workArea;
+    expect(f.x >= wa.x && f.y >= wa.y && f.x + f.width <= wa.x + wa.width && f.y + f.height <= wa.y + wa.height,
+        `the board is outside the work area: ${JSON.stringify(f)}`);
+    pointer.moveTo(...AWAY);
+    await ctx.wait(300);
+    await ctx.shot('wardrobe');
+
+    // The sticker stars list the days on hover (Swift: .help).
+    const stars = view.stickerLabels.stars;
+    const [sx, sy] = stars.get_transformed_position();
+    const [sw, sh] = stars.get_transformed_size();
+    pointer.moveTo(sx + sw / 2, sy + sh / 2);
+    await ctx.wait(900);
+    const tip = board.page.view.tooltipLabel;
+    console.log(`TODOPET wardrobe tooltip visible=${tip.visible} "${tip.text}"`);
+    expect(tip.visible && tip.text === m.stickers.days, 'the sticker book does not list its days on hover');
+    await ctx.shot('wardrobe-tooltip');
+    pointer.moveTo(...AWAY);
+    await ctx.wait(300);
+
+    const changes = [];
+    const id = brain.on('changed', () => changes.push(brain.life.state.wearing.join()));
+    try {
+        const row = accessory => view.rows.find(r => r.id === accessory);
+        // The bow is worn with the scarf (a head slot and a neck slot).
+        await click(ctx, pointer, row('bow').button);
+        console.log(`TODOPET wardrobe wearing ${brain.life.state.wearing} button "${row('bow').button.label}" changes ${changes}`);
+        expect(brain.life.state.wearing.join() === 'scarf,bow', `Wear: ${brain.life.state.wearing}`);
+        expect(row('bow').button.label === L('Cởi ra', 'Take off') && changes.length > 0, 'the button did not turn into Take off');
+        pointer.moveTo(...AWAY);
+        await ctx.wait(300);
+        await ctx.shot('wardrobe-worn');
+        // The top hat takes the bow's place (one accessory per slot).
+        await click(ctx, pointer, row('tophat').button);
+        expect(brain.life.state.wearing.join() === 'scarf,tophat', `the top hat did not replace the bow: ${brain.life.state.wearing}`);
+        expect(row('bow').button.label === L('Đeo', 'Wear'), 'the bow still says Take off');
+        await click(ctx, pointer, row('tophat').button);
+        expect(brain.life.state.wearing.join() === 'scarf', `Take off: ${brain.life.state.wearing}`);
+    } finally {
+        brain.off(id);
+    }
+
+    await click(ctx, pointer, view.backButton);
+    expect(board.pageKind === null && board.view === 'tasks' && board.isOpen, 'the back button did not go back to the task list');
+}));
+
+// The sample diary of docs/diary.png (Swift's DevTools snapshot).
+function addSampleDiary(brain) {
+    const base = new Date();
+    base.setHours(9, 0, 0, 0);
+    const at = minutes => new Date(base.getTime() + minutes * 60_000);
+    const next = brain.day.next?.title ?? 'Report';
+    const sample = [
+        [0, 'bubble', L('“Chào buổi sáng! ☀️ Hôm nay mình làm 3 việc gì nào?” — vì lời chào đầu ngày làm việc, mới có 2/3 việc',
+            '“Good morning! ☀️ What are our 3 things today?” — because first greeting of the workday, only 2/3 planned'), null, null],
+        [1, 'response', L('Bạn bấm “＋ Thêm việc”', 'You tapped “＋ Add tasks”'), 'picked', null],
+        [12, 'flow', L('Bạn vào guồng (gõ phím đều 10 phút) — pet giữ im lặng',
+            'You\'re in the zone (10 minutes of steady typing) — the pet stays quiet'), 'flowStart', null],
+        [40, 'hold', L('Có lời nhắc đến hạn nhưng bạn đang vào guồng — để sau',
+            'A reminder is due but you\'re in the zone — later'), null, null],
+        [64, 'flow', L('Hết guồng sau 52 phút', 'Left the zone after 52 minutes'), 'flowEnd', 52],
+        [65, 'life', L(`Xong “${next}” → no 95%, 345 XP, combo ×2`, `Done “${next}” → 95% full, 345 XP, combo ×2`), null, null],
+        [90, 'distraction', L('Đang ở youtube.com hơn 2 phút', 'On youtube.com for 2+ minutes'), null, null],
+        [91, 'bubble', L('“Ê! Đang youtube.com đó hả? 👀” — vì ở youtube.com 2 phút trong giờ làm',
+            '“Hey! On youtube.com? 👀” — because on youtube.com for 2 min during work hours'), null, null],
+        [91.8, 'response', L('Bạn không phản hồi (tự ẩn)', 'No response (faded away)'), 'ignored', null],
+        [98, 'distraction', L('Rời youtube.com sau 8 phút', 'Left youtube.com after 8 minutes'), 'end', 8],
+        [99, 'mood', L('Tâm trạng: bình thường → đang nhăn nhó (điểm 41) — −21 đang xao nhãng với youtube.com',
+            'Mood: chill → annoyed (score 41) — −21 distracted by youtube.com'), null, null],
+    ];
+    for (const [minutes, kind, text, tag, mins] of sample)
+        brain.diary.add(kind, text, {tag, minutes: mins, now: at(minutes)});
+    return sample;
+}
+
+// The diary: day picker, filter, summary, entries, Copy (the clipboard gets the whole day) and Open folder. Yesterday
+// and an older day come from files (a stand-in for the diary folder); the folder button is only there with a folder.
+registerScene('diary', ctx => withBoard(ctx, Mood.angry, async (board, pet, pointer) => {
+    const {app} = ctx;
+    const {brain} = app;
+    const sample = addSampleDiary(brain);
+    const today = dayKey(new Date());
+    const dayBefore = offset => dayKey(new Date(Date.now() - offset * 86_400_000));
+    const yesterday = dayBefore(1);
+    const older = dayBefore(3);
+    const yesterdayEntries = [
+        {id: 'y1', time: new Date(`${yesterday}T17:02:00`).toISOString(), kind: 'bubble', text: 'Yesterday: time to wrap up?'},
+        {id: 'y2', time: new Date(`${yesterday}T10:15:00`).toISOString(), kind: 'hold', text: 'Yesterday: held back, you were in the zone', tag: null},
+        {id: 'y3', time: new Date(`${yesterday}T09:30:00`).toISOString(), kind: 'focus', text: 'Yesterday: started a 25-minute focus session'},
+    ];
+    const folder = GLib.build_filenamev([GLib.get_user_data_dir(), 'todopet', 'log']);
+    const files = {
+        dir: folder,
+        append: async () => {},
+        remove: async () => {},
+        list: async () => [yesterday, older],
+        read: async day => (day === yesterday ? `${yesterdayEntries.map(e => JSON.stringify(e)).join('\n')}\n` : ''),
+    };
+    const diary = brain.diary;
+    expect(diary.folder === null, 'the demo diary has a folder');
+    diary._files = files;
+    const opened = [];
+    try {
+        await withStub(app, 'openURL', url => opened.push(url), async () => {
+            board.open();
+            await ctx.wait(800);
+            await brain.settle();
+            await click(ctx, pointer, board.diaryButton);
+            expect(board.isOpen && board.pageKind === 'diary' && board.view === 'page', `the diary is not up (${board.pageKind})`);
+            const view = board.page.view;
+            await view.loaded;
+            await ctx.wait(400);
+            // The diary may still be growing (the brain writes to it): the page catches up within a second.
+            await until(ctx, () => view.rowTexts.length === diary.today.length && view.summaryLabel.text === new LogSummary(diary.today).text);
+            const entries = diary.today;
+            console.log(`TODOPET diary day=${view.day} entries=${entries.length} rows=${view.rowTexts.length} ` +
+                `summary "${view.summaryLabel.text}" folder=${view.folderButton.visible}`);
+            expect(sample.every(([, , text]) => view.rowTexts.includes(text)), 'the sample entries are not all on screen');
+            expect(view.rowTexts.length === entries.length, `${view.rowTexts.length} rows for ${entries.length} entries`);
+            expect(view.summaryLabel.text === new LogSummary(entries).text && view.summaryLabel.text.includes('💬'),
+                `the summary: ${view.summaryLabel.text}`);
+            expect(view.rowTexts[0] === diaryRows(entries, 'all').rows[0].text, 'the newest entry is not first');
+            expect(view.folderButton.visible, 'Open folder is missing although the diary has a folder');
+            const f = board.frame;
+            const wa = pet.workArea;
+            expect(f.x >= wa.x && f.y >= wa.y && f.x + f.width <= wa.x + wa.width && f.y + f.height <= wa.y + wa.height,
+                `the board is outside the work area: ${JSON.stringify(f)}`);
+            pointer.moveTo(...AWAY);
+            await ctx.wait(300);
+            await ctx.shot('diary');
+
+            // Filter: Held back keeps the holds, flow, meetings and focus.
+            const quietRows = () => diaryRows(diary.today, 'quiet').rows.map(r => r.text);
+            await click(ctx, pointer, view.filterButtons[2]);
+            await until(ctx, () => view.rowTexts.join('|') === quietRows().join('|'));
+            console.log(`TODOPET diary held back ${view.rowTexts.length} of ${diary.today.length}`);
+            expect(quietRows().length > 0 && view.rowTexts.join('|') === quietRows().join('|'),
+                `Held back shows ${view.rowTexts.length} rows, not ${quietRows().length}`);
+            pointer.moveTo(...AWAY);
+            await ctx.wait(200);
+            await ctx.shot('diary-held');
+            await click(ctx, pointer, view.filterButtons[0]);
+            await until(ctx, () => view.rowTexts.length === diary.today.length);
+            expect(view.rowTexts.length === diary.today.length, 'All did not bring every entry back');
+
+            // The day picker: today, yesterday and the older day.
+            await click(ctx, pointer, view.dayButton);
+            console.log(`TODOPET diary days ${view.menuItems.map(i => i.todopetDay).join(' ')}`);
+            expect(view.menuOpen && view.menuItems.map(i => i.todopetDay).join() === [today, yesterday, older].join(),
+                `the day menu: ${view.menuItems.map(i => i.todopetDay)}`);
+            await ctx.wait(200);
+            pointer.moveTo(...AWAY);
+            await ctx.wait(200);
+            await ctx.shot('diary-days');
+            expect(board.handleKey(Clutter.KEY_Escape) && !view.menuOpen && board.isOpen, 'Escape did not close the day menu first');
+            await click(ctx, pointer, view.dayButton);
+            expect(view.menuOpen, 'the day button did not open the menu again');
+            await click(ctx, pointer, view.summaryLabel);
+            expect(!view.menuOpen && board.isOpen, 'a click outside did not close the day menu (or closed the board)');
+
+            await click(ctx, pointer, view.dayButton);
+            await click(ctx, pointer, view.menuItems[1]);
+            await view.loaded;
+            await ctx.wait(300);
+            console.log(`TODOPET diary yesterday ${view.rowTexts.length} rows "${view.rowTexts[0]}" button "${view.model.dayLabel}"`);
+            expect(view.day === yesterday && !view.menuOpen, 'the menu did not take us to yesterday');
+            expect(view.rowTexts.join('|') === yesterdayEntries.map(e => e.text).join('|'), `yesterday's rows: ${view.rowTexts}`);
+            expect(view.model.dayLabel === L('Hôm qua', 'Yesterday'), 'the picker does not say Yesterday');
+
+            // Copy gives the clipboard the whole day, with its date; the button says so.
+            await click(ctx, pointer, view.copyButton);
+            const text = await new Promise(resolve =>
+                St.Clipboard.get_default().get_text(St.ClipboardType.CLIPBOARD, (_clipboard, value) => resolve(value)));
+            const loaded = await diary.load(yesterday);
+            console.log(`TODOPET diary copied ${JSON.stringify(text?.split('\n').slice(0, 2))} label "${view.model.copy.label}"`);
+            expect(text === PetLog.exportText(loaded, yesterday) && text.includes(yesterday) && text.includes('💬'), `the clipboard: ${text}`);
+            expect(view.model.copy.label === L('Đã sao chép ✔︎', 'Copied ✔︎'), 'the Copy button does not say Copied');
+
+            // A day without a file says so; back to today the copied mark is gone.
+            await click(ctx, pointer, view.dayButton);
+            await click(ctx, pointer, view.menuItems[2]);
+            await view.loaded;
+            await ctx.wait(300);
+            expect(view.day === older && view.emptyLabel?.visible && view.rowTexts.length === 0, 'an empty day does not say so');
+            expect(view.model.copy.label === L('Sao chép', 'Copy'), 'the copied mark stayed on another day');
+            await click(ctx, pointer, view.dayButton);
+            await click(ctx, pointer, view.menuItems[0]);
+            await until(ctx, () => view.rowTexts.length === diary.today.length);
+            expect(view.day === today && view.rowTexts.length === diary.today.length, 'the picker did not bring today back');
+
+            // Open folder opens the diary's folder (a stub records it), then the board makes way for the file manager.
+            await click(ctx, pointer, view.folderButton);
+            await until(ctx, () => !board.isOpen);
+            console.log(`TODOPET diary opened ${opened} board open=${board.isOpen}`);
+            expect(opened.length === 1 && opened[0] === folderURI(folder), `Open folder opened ${opened}`);
+            expect(!board.isOpen, 'the board stayed open over the file manager');
+        });
+    } finally {
+        diary._files = null;
+    }
 }));

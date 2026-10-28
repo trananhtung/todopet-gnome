@@ -8,8 +8,12 @@
 //                             for a sync (Swift: AppDelegate.openBoard); focusAdd puts the key focus in "Add a task"
 //   close(), toggle(), isOpen, refresh() (re-render soon; App calls it on every brain change), destroy()
 //   handleKey(keyval) -> bool Escape closes it. A press outside the board closes it too.
-//   showPage(kind, arg), closePage()   the split view, the wardrobe and the diary in place of the task list, once
-//                             `board.pages[kind] = (app, onBack, arg) => St.Widget` is set (Task 20)
+//   showPage(kind, arg), closePage()   the split view, the wardrobe and the diary (ui/splitView.js, ui/wardrobe.js,
+//                             ui/diary.js) in place of the task list. A page is `board.pages[kind](app, onBack, arg)`,
+//                             an St.Widget that may carry dispose() (called before it is destroyed) and handleEscape()
+//                             (called first on Escape; true when it used the key), and setScrolling(on) when its content
+//                             is in a scroll view (the board turns it on only when the page is taller than the screen
+//                             allows). A page that changes size calls relayout(). The split view takes the task as `arg`.
 //
 // Layout, top to bottom (as docs/board-light.png): header (little pet, mood, the day's dots, the reason with its
 // breakdown on hover, the Todoist streak), life bar, then either the token setup or: demo note, "only N/3 planned",
@@ -31,6 +35,9 @@ import {insideRect} from './bubbleLogic.js';
 import {
     BOARD, addPlaceholder, boardModel, dueChoices, hotkeyLabel, listHeight, placeBoard, priorityChoices,
 } from './boardLogic.js';
+import {build as buildDiary} from './diary.js';
+import {build as buildSplit} from './splitView.js';
+import {build as buildWardrobe} from './wardrobe.js';
 import {
     MiniPet, ProgressBar, Segmented, Tooltips, box, divider, iconButton, label, linkButton, pillButton, priorityCheck,
     sectionHeader, setSensitive, spacer, wrapLabel,
@@ -82,8 +89,8 @@ export class Board {
         this._errors = new Set();
         this._placement = null;
         this._size = {width: 0, height: 0};
-        // Task 20 sets these: (app, onBack, arg) -> St.Widget.
-        this.pages = {split: null, wardrobe: null, diary: null};
+        // (app, onBack, arg) -> St.Widget. A kind set to null has no page: its button stays dimmed.
+        this.pages = {split: buildSplit, wardrobe: buildWardrobe, diary: buildDiary};
         this.model = null;
 
         this._themeContext = St.ThemeContext.get_for_stage(global.stage);
@@ -142,6 +149,23 @@ export class Board {
 
     get confirmButtons() {
         return this._confirmButtons ?? null;
+    }
+
+    // The page now shown (its actor, with `view` for the scenes), or null.
+    get page() {
+        return this._page?.actor ?? null;
+    }
+
+    get pageKind() {
+        return this._page?.kind ?? null;
+    }
+
+    get wardrobeButton() {
+        return this._wardrobeButton ?? null;
+    }
+
+    get diaryButton() {
+        return this._diaryButton ?? null;
     }
 
     get view() {
@@ -226,9 +250,12 @@ export class Board {
             this.open();
     }
 
-    // Escape closes the board. Returns whether the key was used.
+    // Escape takes away what a page has open (the diary's day menu, the split view's delete question) or else closes
+    // the board. Returns whether the key was used.
     handleKey(keyval) {
         if (keyval === Clutter.KEY_Escape && this._open) {
+            if (this._page?.actor.handleEscape?.())
+                return true;
             this.close();
             return true;
         }
@@ -295,6 +322,12 @@ export class Board {
             this.showPage(kind);
     }
 
+    // A page changed size (steps added, a message shown): measure the board and put it back next to the pet.
+    relayout() {
+        if (this._open && this._root)
+            this._guard('layout', () => this._layout());
+    }
+
     _destroyPage() {
         const page = this._page;
         this._page = null;
@@ -302,6 +335,8 @@ export class Board {
             return;
         if (this._view === 'page')
             this._view = null;
+        // The page stops its own timers and listeners first: a `destroy` handler would run during garbage collection.
+        this._guard(`closing the ${page.kind} page`, () => page.actor?.dispose?.());
         page.actor?.destroy();
     }
 
@@ -598,6 +633,7 @@ export class Board {
         const wardrobe = new St.Button({label: l.wardrobe, style_class: 'todopet-plain-button todopet-caption', can_focus: true});
         wardrobe.connect('clicked', () => this.showPage('wardrobe'));
         setSensitive(wardrobe, Boolean(this.pages.wardrobe));
+        this._wardrobeButton = wardrobe;
         first.add_child(wardrobe);
         slot.add_child(first);
 
@@ -866,6 +902,7 @@ export class Board {
             L('Nhật ký pet: vì sao pet nhắc, cáu hay im lặng', 'Pet diary: why the pet spoke up, got grumpy or stayed quiet'),
             () => this._togglePage('diary'));
         setSensitive(diary, Boolean(this.pages.diary));
+        this._diaryButton = diary;
         button('emblem-system-symbolic', L('Cài đặt', 'Settings'), () => brain?.openSettings?.());
     }
 
@@ -970,7 +1007,15 @@ export class Board {
             this._content.queue_relayout();
             height = others + list;
         } else {
+            // A page (or the token setup) taller than the screen gives way: its scroll view takes the difference, and
+            // scrolls only then.
+            const scroller = this._view === 'page' ? this._page?.actor : null;
+            scroller?.setScrolling?.(false);
             [, height] = this._root.get_preferred_height(width);
+            const available = wa.height - 2 * BOARD.margin * unit;
+            if (height > available)
+                scroller?.setScrolling?.(true);
+            height = Math.min(height, available);
         }
         this._size = {width: Math.ceil(width), height: Math.ceil(height)};
         this._root.set_size(this._size.width, this._size.height);

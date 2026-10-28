@@ -589,3 +589,189 @@
     selected-color: #f2f2f2;
 }
 .todopet-board-dark .todopet-entry StLabel.hint-text { color: rgba(255, 255, 255, 0.4); }
+
+/* Pages in place of the task list: the split view (BreakdownView in PlanningViews.swift), the wardrobe (WardrobeView in
+   LifeViews.swift) and the diary (LogView.swift). Swift's .padding(14) and its VStack spacing. A page is built by
+   ui/splitView.js, ui/wardrobe.js and ui/diary.js. */
+.todopet-page {
+    padding: 14px;
+    spacing: 10px;
+}
+
+.todopet-page-diary { spacing: 8px; }
+.todopet-page-header { spacing: 8px; }
+
+/* A page whose scroll view gives way on a short screen keeps this much. */
+.todopet-page-scroll { min-height: 120px; }
+
+.todopet-page-task {
+    font-size: 14px;
+    font-weight: bold;
+}
+
+/* A default (bordered) button of macOS: a rounded rectangle, not Swift's PillButtonStyle capsule. */
+.todopet-pill-box {
+    padding: 6px 14px;
+    border-radius: 7px;
+    font-size: 13px;
+    font-weight: normal;
+}
+
+.todopet-pill-danger { color: #e5383b; background-color: rgba(255, 59, 48, 0.16); }
+.todopet-pill-danger:hover,
+.todopet-pill-danger:focus { background-color: rgba(255, 59, 48, 0.26); }
+.todopet-pill-danger:active { background-color: rgba(255, 59, 48, 0.34); }
+
+/* The split view. */
+.todopet-split-actions { spacing: 8px; }
+.todopet-steps { spacing: 8px; }
+.todopet-step { spacing: 6px; }
+
+.todopet-step-number {
+    min-width: 18px;
+    font-size: 12px;
+    text-align: right;
+}
+
+.todopet-step-remove {
+    padding: 2px;
+    border-radius: 999px;
+    border: 1.5px solid rgba(0, 0, 0, 0.45);
+}
+
+.todopet-step-remove .todopet-icon { icon-size: 10px; }
+.todopet-add-step { padding: 2px 4px; }
+.todopet-add-step .todopet-icon { icon-size: 14px; }
+.todopet-add-step .todopet-icon-button-text { font-size: 12px; }
+
+.todopet-check-row {
+    padding: 2px 0;
+    border-radius: 5px;
+    color: #242424;
+}
+
+.todopet-check-row-box { spacing: 6px; }
+
+.todopet-checkbox {
+    width: 14px;
+    height: 14px;
+    border-radius: 4px;
+    border: 1px solid rgba(0, 0, 0, 0.3);
+    background-color: #ffffff;
+}
+
+.todopet-check-row:checked .todopet-checkbox {
+    border-color: -st-accent-color;
+    background-color: -st-accent-color;
+}
+
+.todopet-check-row:focus .todopet-checkbox { box-shadow: 0 0 0 2px st-transparentize(-st-accent-color, 0.4); }
+.todopet-checkbox-mark { icon-size: 11px; color: -st-accent-fg-color; }
+
+.todopet-confirm-box {
+    padding: 8px;
+    spacing: 8px;
+    border-radius: 8px;
+    background-color: rgba(255, 59, 48, 0.07);
+}
+
+.todopet-split-bottom { spacing: 8px; }
+
+/* The wardrobe. */
+.todopet-wardrobe-top { spacing: 12px; }
+
+.todopet-wardrobe-pet {
+    width: 96px;
+    height: 96px;
+}
+
+.todopet-stats { spacing: 3px; }
+.todopet-stat { spacing: 4px; }
+.todopet-stickers { spacing: 4px; }
+.todopet-stars { font-size: 16px; }
+.todopet-accessories { spacing: 10px; }
+.todopet-accessory { spacing: 10px; }
+
+.todopet-accessory-emoji {
+    min-width: 22px;
+    font-size: 18px;
+    text-align: center;
+}
+
+.todopet-accessory-text { spacing: 0; }
+
+.todopet-accessory-name {
+    font-size: 12px;
+    font-weight: bold;
+}
+
+.todopet-accessory-status { font-size: 10px; }
+
+/* The diary. */
+.todopet-day-button {
+    padding: 4px 8px;
+    border-radius: 7px;
+    background-color: rgba(0, 0, 0, 0.06);
+}
+
+.todopet-day-button:hover,
+.todopet-day-button:focus { background-color: rgba(0, 0, 0, 0.1); }
+.todopet-day-button-box { spacing: 6px; }
+
+.todopet-diary-list {
+    padding-right: 10px;
+    spacing: 5px;
+}
+
+.todopet-diary-scroll {
+    height: 300px;
+    min-height: 120px;
+}
+
+.todopet-diary-row { spacing: 6px; }
+.todopet-diary-time { min-width: 38px; }
+.todopet-diary-icon { min-width: 14px; }
+.todopet-diary-empty { padding: 8px 0; }
+.todopet-diary-actions { spacing: 8px; }
+.todopet-diary-action { font-size: 12px; }
+.todopet-diary-action .todopet-icon-button-text { font-size: 12px; }
+
+.todopet-day-menu {
+    max-height: 240px;
+    padding: 4px;
+    border-radius: 8px;
+    border: 1px solid rgba(0, 0, 0, 0.14);
+    background-color: #ffffff;
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.22);
+}
+
+.todopet-day-item {
+    padding: 4px 10px 4px 6px;
+    border-radius: 5px;
+    color: #242424;
+}
+
+.todopet-day-item:hover,
+.todopet-day-item:focus { background-color: rgba(0, 0, 0, 0.07); }
+.todopet-day-item-box { spacing: 6px; }
+.todopet-day-mark { icon-size: 12px; }
+
+/* Pages, dark. */
+.todopet-board-dark .todopet-pill-danger { color: #ff453a; background-color: rgba(255, 69, 58, 0.22); }
+.todopet-board-dark .todopet-pill-danger:hover,
+.todopet-board-dark .todopet-pill-danger:focus { background-color: rgba(255, 69, 58, 0.32); }
+.todopet-board-dark .todopet-check-row { color: #f2f2f2; }
+.todopet-board-dark .todopet-checkbox { border-color: rgba(255, 255, 255, 0.35); background-color: rgba(255, 255, 255, 0.06); }
+.todopet-board-dark .todopet-check-row:checked .todopet-checkbox { border-color: -st-accent-color; background-color: -st-accent-color; }
+.todopet-board-dark .todopet-confirm-box { background-color: rgba(255, 69, 58, 0.12); }
+.todopet-board-dark .todopet-day-button { background-color: rgba(255, 255, 255, 0.1); }
+.todopet-board-dark .todopet-day-button:hover,
+.todopet-board-dark .todopet-day-button:focus { background-color: rgba(255, 255, 255, 0.16); }
+.todopet-board-dark .todopet-day-menu {
+    border-color: rgba(255, 255, 255, 0.16);
+    background-color: #2b2b2b;
+}
+.todopet-board-dark .todopet-step-remove { border-color: rgba(255, 255, 255, 0.5); }
+.todopet-board-dark .todopet-day-item { color: #f2f2f2; }
+.todopet-board-dark .todopet-day-item:hover,
+.todopet-board-dark .todopet-day-item:focus { background-color: rgba(255, 255, 255, 0.1); }

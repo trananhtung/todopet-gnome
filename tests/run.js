@@ -21,6 +21,7 @@ const TESTS = [
     './pet-geometry.test.js',
     './bubble-logic.test.js',
     './board-logic.test.js',
+    './views-logic.test.js',
 ];
 
 const t = new T();

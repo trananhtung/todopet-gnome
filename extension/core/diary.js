@@ -151,7 +151,8 @@ function dayOfName(name) {
 
 // The pet's diary: today's entries in memory, and one JSON-lines file per day behind them.
 //
-// `files` is {append(day, line), read(day) -> Promise<string>, list() -> Promise<string[]>, remove(day)}:
+// `files` is {append(day, line), read(day) -> Promise<string>, list() -> Promise<string[]>, remove(day), dir?}
+// (`dir` is the folder, for "Open folder"):
 //   append  adds `line` to that day's file as given. It is one JSON object and ends in a newline.
 //   read    gives the whole text of that day's file ('' when there is none).
 //   list    gives the days that have a file ("2026-10-25"; a ".jsonl" ending is tolerated).
@@ -178,6 +179,11 @@ export class PetLog {
         this._today = [];
         this._lastByKey = new Map();
         this._queue = Promise.resolve();
+    }
+
+    // The folder the day files live in (Swift: log.folder), or null while the diary is only in memory.
+    get folder() {
+        return this._files?.dir ?? null;
     }
 
     // Today's entries, oldest first (a copy).

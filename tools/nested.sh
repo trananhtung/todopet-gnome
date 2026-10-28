@@ -12,7 +12,7 @@
 set -euo pipefail
 
 # Scenes played by default, in this order. A task that adds a scene appends its id here.
-SCENES=(smoke services walk hover drag focus-chip sleeping bubble bubble-stuck long-title board board-setup board-delete add board-bubble board-hidden)
+SCENES=(smoke services walk hover drag focus-chip sleeping bubble bubble-stuck long-title board board-setup board-delete add board-bubble board-hidden split wardrobe diary)
 
 UUID=todopet@trananhtung.github.io
 MONITOR=1600x900
