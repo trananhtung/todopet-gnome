@@ -42,4 +42,4 @@ install: build
 pack: build
 	gnome-extensions pack $(BUILD_DIR) --force --out-dir=build \
 		--extra-source=core --extra-source=services --extra-source=art \
-		--extra-source=ui --extra-source=brain.js
+		--extra-source=ui --extra-source=brain --extra-source=brain.js

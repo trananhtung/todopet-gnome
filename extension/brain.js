@@ -17,8 +17,9 @@
 // A bubble is {id, text, actions: [{title, primary, run}], seconds = 12, urgent, reminder}.
 //
 // Sections, in Brain.swift order: token and demo, sync, mood, life settlement, talking, tick.
-// The reminder rules, flow and distraction tracking and mischief (Task 15) and the task actions and focus sessions
-// (Task 16) build on the state laid out in the constructor; their places in tick are marked below.
+// The reminder rules, flow and distraction tracking and mischief live in brain/rules.js and are installed as Brain
+// methods at the end of this file (runRules, updateFlow, trackDistraction and their helpers). The task actions and
+// focus sessions (Task 16) build on the state laid out in the constructor; their place in tick is marked below.
 import {atHour, dayKey, parseDate, shortText, timeString} from './core/dates.js';
 import {currentEvent, freeMinutes, suggest, targetFor} from './core/calendarMath.js';
 import {PetLog} from './core/diary.js';
@@ -30,6 +31,7 @@ import {DaySnapshot} from './core/models.js';
 import {Mood, defaultMoodInputs, evaluateMood, moodLabel} from './core/mood.js';
 import {isBrowser, matchTitle} from './core/sites.js';
 import {StuckTracker} from './core/stuck.js';
+import {installRules} from './brain/rules.js';
 import {demoEvents} from './services/demo.js';
 import {SECRET_ANTHROPIC, SECRET_TODOIST} from './services/secrets.js';
 import {shouldPlay} from './services/sound.js';
@@ -53,6 +55,8 @@ const RETRY_READ_MS = 3 * MINUTE;
 const AWAY_SECONDS = 300;
 // Swift's Date.distantPast.
 const NEVER = new Date(0);
+// The bubble view hides a bubble after its `seconds`; a bubble nobody took away is dropped this much later.
+const BUBBLE_GRACE_MS = 2 * SECOND;
 
 // A pet with some history, for the demo (Swift: LifeState.demo).
 const DEMO_LIFE = Object.freeze({
@@ -214,6 +218,8 @@ export class Brain extends Emitter {
         this._lastTickAt = null;
         this._lastSlowTick = null;
         this._bubbleSeq = 0;
+        this._bubbleUntil = null;
+        this._anticSeq = 0;
         this._pins = {};
         this._pending = new Set();
         this._prefsId = null;
@@ -704,6 +710,11 @@ export class Brain extends Emitter {
         return this.locked || this._idleSeconds(now) > AWAY_SECONDS;
     }
 
+    // A whole-number preference in [lo, hi]; GSettings does not range-check them.
+    _prefInt(name, lo, hi = Infinity) {
+        return clampInt(this.prefs[name], lo, hi);
+    }
+
     _secondsSinceKey() {
         try {
             const s = Number(this.env.secondsSinceKey());
@@ -1035,6 +1046,7 @@ export class Brain extends Emitter {
 
     _showBubble(bubble) {
         this.bubble = bubble;
+        this._bubbleUntil = bubble ? new Date(this._now().getTime() + bubble.seconds * SECOND + BUBBLE_GRACE_MS) : null;
         this.emit('bubble', bubble);
         this._changed();
     }
@@ -1070,8 +1082,13 @@ export class Brain extends Emitter {
         }
         if (this._askTokenAt !== null && now >= this._askTokenAt) {
             this._askTokenAt = null;
+            // The rules ask again an hour later, not on their next round.
+            this.fired.set('token', now);
             this._askForToken();
         }
+        // Swift's bubble window hides a bubble after its seconds and clears it; this does it when no view did.
+        if (this.bubble !== null && this._bubbleUntil !== null && now >= this._bubbleUntil)
+            this._showBubble(null);
         if (this._recomputeAt !== null && now >= this._recomputeAt) {
             this._recomputeAt = null;
             this.recompute(now);
@@ -1095,9 +1112,10 @@ export class Brain extends Emitter {
         const ctx = this._context(now);
         const working = this.hasToken && ctx.inWork && this._currentMeeting(now) === null && !this._isAway(now);
         this.life.mutate(s => LifeRules.decay(s, now, working));
-        // Task 15: time on distracting sites, the end of a block antic, trackDistraction(), updateFlow().
+        // Time on distracting sites, the end of a block, the distraction log and deep work (brain/rules.js).
+        this._watchWork(now);
         this.recompute(now);
-        // Task 15: runRules(now).
+        this.runRules(now);
     }
 
     // After a sleep (or a long gap between ticks): a new day is settled, then a sync.
@@ -1198,3 +1216,6 @@ export class Brain extends Emitter {
         console.error(message);
     }
 }
+
+// runRules(now), updateFlow(now), trackDistraction(now) and the rules' helpers (brain/rules.js).
+installRules(Brain);
