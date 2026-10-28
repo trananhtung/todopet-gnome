@@ -8,6 +8,7 @@ import Clutter from 'gi://Clutter';
 import GLib from 'gi://GLib';
 import Gio from 'gi://Gio';
 import Shell from 'gi://Shell';
+import St from 'gi://St';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
 import {L} from '../core/l10n.js';
@@ -597,4 +598,246 @@ registerScene('long-title', ctx => withPet(ctx, Mood.normal, async pet => {
     expect(!view.visible && brain.bubble === null, 'the bubble did not go after its seconds');
     expect(responses(brain, 'ignored') === 1, 'the diary does not say the bubble was ignored');
     expect(!pet.paused, 'the pet still stands after the bubble went');
+}));
+
+// --- The task board (ui/board.js) ---
+
+// A virtual keyboard, like the mouse above: keys go through the same path as a person's (the board's modal grab).
+let virtualKeyboard = null;
+
+function keyboard() {
+    if (!virtualKeyboard) {
+        const seat = global.stage.context.get_backend().get_default_seat();
+        virtualKeyboard = seat.create_virtual_device(Clutter.InputDeviceType.KEYBOARD_DEVICE);
+    }
+    const device = virtualKeyboard;
+    return {
+        tap(keyval) {
+            const now = GLib.get_monotonic_time();
+            device.notify_keyval(now, keyval, Clutter.KeyState.PRESSED);
+            device.notify_keyval(now + 1000, keyval, Clutter.KeyState.RELEASED);
+        },
+    };
+}
+
+// Runs body(board, pet, pointer) on a work day whose hours put "now" where the reference screenshot is (after the plan
+// deadline, before the end of the day, so the calendar card has free time and, before 18:00, time blocks), with the
+// daily target of 3 (not lowered for the demo's meetings) and the mood pinned (null: the brain's own). Afterwards the
+// board is closed and the settings are back.
+async function withBoard(ctx, mood, body) {
+    const {settings} = ctx.app;
+    const ints = ['work-start', 'work-end', 'plan-deadline'].map(key => [key, settings.get_int(key)]);
+    const days = ['work-saturday', 'work-sunday', 'adapt-target'].map(key => [key, settings.get_boolean(key)]);
+    const hour = new Date().getHours();
+    const start = Math.max(0, hour - 4);
+    settings.set_int('work-start', start);
+    settings.set_int('work-end', Math.min(24, hour + 6));
+    settings.set_int('plan-deadline', Math.max(start, hour - 2));
+    for (const [key] of days)
+        settings.set_boolean(key, key !== 'adapt-target');
+    try {
+        await withPet(ctx, mood, async (pet, pointer) => {
+            const board = ctx.app.board;
+            await untilOnGround(ctx, pet);
+            try {
+                await body(board, pet, pointer);
+            } finally {
+                board.close();
+            }
+        });
+    } finally {
+        for (const [key, value] of ints)
+            settings.set_int(key, value);
+        for (const [key, value] of days)
+            settings.set_boolean(key, value);
+    }
+}
+
+// The board is inside the work area and next to the pet: above its body, or beside it.
+function expectBoardPlaced(board, pet) {
+    const f = board.frame;
+    const wa = pet.workArea;
+    const p = pet.frame;
+    console.log(`TODOPET board frame ${JSON.stringify(f)} side ${board.side} pet ${JSON.stringify(p)} work area ${JSON.stringify(wa)}`);
+    expect(f.x >= wa.x && f.y >= wa.y && f.x + f.width <= wa.x + wa.width && f.y + f.height <= wa.y + wa.height,
+        `the board is outside the work area: ${JSON.stringify(f)}`);
+    const beside = {
+        above: f.y + f.height <= p.y + p.height * 0.28,
+        left: f.x + f.width <= p.x,
+        right: f.x >= p.x + p.width,
+    }[board.side];
+    expect(beside, `the board is not next to the pet (${board.side})`);
+}
+
+const modalBefore = () => Main.modalCount;
+
+// The board with the demo's day, as docs/board-light.png: header, life bar, demo note, "only 2/3 planned", the add
+// row, the frog, the calendar card, then the overdue task and today's two. The reason shows its breakdown on hover.
+// Escape closes it and gives the modal grab back; a click on the pet opens it, a click outside closes it.
+registerScene('board', ctx => withBoard(ctx, Mood.angry, async (board, pet, pointer) => {
+    const {brain} = ctx.app;
+    const modals = modalBefore();
+    board.open();
+    await ctx.wait(1000);
+    await brain.settle();
+    await ctx.wait(300);
+    const sections = board.sections();
+    console.log(`TODOPET board sections ${sections.join(' ')} | list ${board.listText().join(' | ')}`);
+    console.log(`TODOPET board header "${board.model.header.title}" ${board.model.header.progress} ` +
+        `"${board.model.header.reason?.label}" streak ${board.model.header.streak?.value}`);
+    expect(board.isOpen && Main.modalCount === modals + 1, `the board is not open and modal (${Main.modalCount} modals)`);
+    expect(pet.paused, 'the pet does not stand still while the board is open');
+    expect(sections.join() === 'header,life,demo,nag,add,frog,calendar,list', `the board's parts: ${sections}`);
+    const {lists} = board.model;
+    expect(lists.overdue?.rows.length === 1 && lists.today.rows.length === 2,
+        `the demo's day is not 1 overdue and 2 today: ${board.listText()}`);
+    const calendar = board.model.calendar;
+    console.log(`TODOPET board calendar "${calendar?.meeting?.label ?? calendar?.none}" "${calendar?.summary}" ` +
+        `blocks ${calendar?.blocks.map(b => b.time).join(' ')}`);
+    expect(calendar?.meeting || calendar?.none, 'the calendar card is missing');
+    // The demo's meetings are 1 and 4 hours from now; before 18:00 there is a free slot between them.
+    expect(new Date().getHours() > 17 || calendar.blocks.length > 0, 'the calendar card has no time blocks');
+    expectBoardPlaced(board, pet);
+    await ctx.shot('board');
+
+    // The reason line explains itself on hover.
+    const reason = board.reasonLabel;
+    expect(reason, 'the reason line is missing');
+    const [rx, ry] = reason.get_transformed_position();
+    const [rw, rh] = reason.get_transformed_size();
+    pointer.moveTo(rx + rw / 2, ry + rh / 2);
+    await ctx.wait(900);
+    const tip = board.tooltip;
+    console.log(`TODOPET board tooltip visible=${tip.visible} "${tip.text.replaceAll('\n', ' / ')}"`);
+    expect(tip.visible && tip.text === board.model.header.breakdown, 'the reason breakdown does not show on hover');
+    pointer.moveTo(...AWAY);
+    await ctx.wait(200);
+
+    // Step 2 of the brief: Escape closes the board.
+    const used = board.handleKey(Clutter.KEY_Escape);
+    console.log(`TODOPET board closed=${!board.isOpen}`);
+    expect(used && !board.isOpen, 'Escape did not close the board');
+    expect(Main.modalCount === modals, `the modal grab was not given back (${Main.modalCount} modals, ${modals} before)`);
+    expect(!pet.paused || ctx.app.bubble.visible, 'the pet still stands after the board closed');
+
+    // A click on the pet opens it; a click anywhere outside it closes it again.
+    pet.paused = true;
+    await ctx.wait(300);
+    const {x, y, width, height} = pet.frame;
+    pointer.moveTo(x + width / 2, y + height * 0.6);
+    await ctx.wait(200);
+    pointer.press();
+    await ctx.wait(60);
+    pointer.release();
+    await ctx.wait(500);
+    console.log(`TODOPET board opened by the pet: ${board.isOpen}`);
+    expect(board.isOpen && Main.modalCount === modals + 1, 'a click on the pet did not open the board');
+    pointer.moveTo(...AWAY);
+    await ctx.wait(200);
+    pointer.press();
+    await ctx.wait(60);
+    pointer.release();
+    await ctx.wait(300);
+    console.log(`TODOPET board closed by a click outside: ${!board.isOpen} modals ${Main.modalCount}`);
+    expect(!board.isOpen && Main.modalCount === modals, 'a click outside did not close the board');
+}));
+
+// No token and no demo: the board asks for a Todoist token (Swift: TokenSetupView). The demo comes back afterwards.
+registerScene('board-setup', ctx => withBoard(ctx, null, async board => {
+    const {brain} = ctx.app;
+    brain.removeToken();
+    try {
+        await ctx.wait(300);
+        board.open();
+        await ctx.wait(800);
+        console.log(`TODOPET board-setup view=${board.view} hasToken=${brain.hasToken} demo=${brain.demo} ` +
+            `sections ${board.sections().join(' ')}`);
+        expect(board.view === 'setup', `the board shows ${board.view}, not the token setup`);
+        expect(board.tokenEntry.mapped && board.tokenEntry instanceof St.PasswordEntry, 'the token field is not on screen');
+        expect(!board.sections().includes('life'), 'the life bar shows without a token');
+        await ctx.shot('board-setup');
+    } finally {
+        board.close();
+        brain.useDemo();
+        await brain.settle();
+        // The demo's greeting gets a frame on screen first: a bubble shown and taken away within one frame makes
+        // Clutter warn about allocating an actor that already left the stage.
+        await ctx.wait(300);
+        brain.dismissBubble();
+    }
+}));
+
+// A task's delete question (Swift: TaskRow's confirmation). Cancel keeps the task; Delete removes it.
+registerScene('board-delete', ctx => withBoard(ctx, Mood.angry, async (board, pet, pointer) => {
+    const {brain} = ctx.app;
+    board.open();
+    await ctx.wait(800);
+    await brain.settle();
+    const task = brain.day.overdue[0] ?? brain.day.today[0];
+    expect(task, 'the demo has no task to delete');
+    board.confirmDelete(task.id);
+    await ctx.wait(300);
+    const asking = [...board.model.lists.overdue?.rows ?? [], ...board.model.lists.today.rows].find(r => r.confirm);
+    console.log(`TODOPET board-delete asks "${asking?.confirm}" about "${asking?.title}"`);
+    expect(board.confirmButtons && asking?.id === task.id, 'the delete question is not shown');
+    await ctx.shot('board-delete');
+
+    await click(ctx, pointer, board.confirmButtons.cancel);
+    expect(board.isOpen && board.confirmButtons === null, 'Cancel did not take the question away (or closed the board)');
+    expect(brain.day.open.some(t => t.id === task.id), 'Cancel deleted the task');
+    // The pointer is still on the row: its actions show (▶ focus, ✂ split, move, delete) and the check has its mark.
+    await ctx.shot('board-hover');
+
+    board.confirmDelete(task.id);
+    await ctx.wait(300);
+    await click(ctx, pointer, board.confirmButtons.remove);
+    await brain.settle();
+    await ctx.wait(300);
+    const gone = !brain.day.open.some(t => t.id === task.id);
+    console.log(`TODOPET board-delete deleted=${gone} bubble="${brain.bubble?.text ?? ''}" list ${board.listText().join(' | ')}`);
+    expect(gone && !board.listText().includes(task.title), 'Delete did not remove the task');
+    expect(board.isOpen, 'deleting closed the board');
+}));
+
+// "Add a task" with the key focus in it (focusAdd, as the shortcut opens it), a title typed in; Enter adds it and
+// empties the field, the Escape key closes the board.
+registerScene('add', ctx => withBoard(ctx, null, async (board, pet, pointer) => {
+    const {brain} = ctx.app;
+    board.open({focusAdd: true});
+    await ctx.wait(800);
+    await brain.settle();
+    const entry = board.addEntry;
+    const focus = global.stage.get_key_focus();
+    expect(focus === entry.clutter_text || focus === entry, `the key focus is not in the add field (${focus})`);
+    entry.set_text('Call Anna');
+    await ctx.wait(300);
+    await ctx.shot('add');
+
+    keyboard().tap(Clutter.KEY_Return);
+    for (let i = 0; i < 30 && !brain.day.today.some(t => t.title === 'Call Anna'); i++)
+        await ctx.wait(100);
+    await brain.settle();
+    await ctx.wait(400);
+    console.log(`TODOPET add today=${brain.day.today.map(t => t.title).join(' | ')} entry="${entry.get_text()}" ` +
+        `bubble="${brain.bubble?.text ?? ''}"`);
+    expect(brain.day.today.some(t => t.title === 'Call Anna'), 'Enter did not add the task');
+    expect(entry.get_text() === '', 'the add field was not emptied');
+    expect(board.listText().includes('Call Anna'), 'the board does not list the new task');
+    await ctx.shot('add-saved');
+
+    keyboard().tap(Clutter.KEY_Escape);
+    await ctx.wait(300);
+    console.log(`TODOPET add closed by the Escape key: ${!board.isOpen}`);
+    expect(!board.isOpen, 'the Escape key did not close the board');
+
+    // An urgent bubble over the open board: a press on its button closes the board and presses the button.
+    board.open();
+    await ctx.wait(400);
+    const ran = [];
+    brain.say({text: 'Xin chào 👋', seconds: 30, urgent: true, actions: [{title: 'Ok', primary: true, run: () => ran.push('ok')}]});
+    await ctx.wait(500);
+    expect(board.isOpen && ctx.app.bubble.visible, 'the urgent bubble did not show over the open board');
+    await click(ctx, pointer, ctx.app.bubble.actionButtons[0]);
+    console.log(`TODOPET add bubble pressed over the board: ran=${ran} board open=${board.isOpen} bubble=${ctx.app.bubble.visible}`);
+    expect(ran.join() === 'ok' && !board.isOpen && !ctx.app.bubble.visible, 'the bubble\'s button did not work over the board');
 }));

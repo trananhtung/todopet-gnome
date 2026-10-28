@@ -1,8 +1,9 @@
 // Composition root: owns every service and UI object, and undoes all of it in stop().
 // extension.js creates one App per enable() and calls stop() from disable().
 //
-// start() runs the Shell services, the files, the brain (ticked every second), the pet and its speech bubble. The pet
-// is shown unless the screen is locked or `hidden-until` is still ahead.
+// start() runs the Shell services, the files, the brain (ticked every second), the pet, its speech bubble and the task
+// board (a click on the pet opens it). The pet is shown unless the screen is locked or `hidden-until` is still ahead.
+// The UI language follows the `lang` setting.
 //
 // Environment variables set only by tools/nested.sh (the isolated nested shell):
 //   TODOPET_NESTED=1      this is the nested dev shell; the only place dev scenes may run. Chimes and speech are
@@ -14,6 +15,7 @@ import Gio from 'gi://Gio';
 import Shell from 'gi://Shell';
 
 import {Brain} from '../brain.js';
+import {setLang} from '../core/l10n.js';
 import {Prefs} from '../core/prefs.js';
 import {CalendarSource} from '../services/calendar.js';
 import {ClaudeClient} from '../services/claude.js';
@@ -26,6 +28,7 @@ import {playChime} from '../services/sound.js';
 import {speak} from '../services/speech.js';
 import {DiaryFiles, JsonStore, dataDir} from '../services/store.js';
 import {TodoistClient} from '../services/todoist.js';
+import {Board} from './board.js';
 import {BubbleView} from './bubble.js';
 import {shouldShowBubble} from './bubbleLogic.js';
 import {PetActor} from './pet.js';
@@ -45,7 +48,7 @@ function memorySecrets() {
 }
 
 // Opens `url` in the default app (a meeting's join link), without waiting.
-function openURL(url) {
+function launchURL(url) {
     const context = global.create_app_launch_context(0, -1);
     Gio.AppInfo.launch_default_for_uri_async(url, context, null, (_source, result) => {
         try {
@@ -72,8 +75,8 @@ export class App {
         this.brain = null;
         this.pet = null;
         this.bubble = null; // BubbleView
-        // Filled in by later tasks. The board must have `isShown`: the pet stands still while it is open.
-        this.board = null;
+        this.board = null; // Board: the pet stands still while it is open
+        // Filled in by later tasks.
         this.antics = null;
         this.indicator = null;
 
@@ -94,6 +97,7 @@ export class App {
         this._started = true;
         this.settings = this.extension.getSettings();
         this.prefs = Prefs.fromSettings(this.settings);
+        setLang(this.prefs.effectiveLang);
         if (this.prefs.firstLaunch === 0)
             this.prefs.firstLaunch = Date.now();
 
@@ -128,6 +132,8 @@ export class App {
 
         this.pet = new PetActor(this);
         this.bubble = new BubbleView(this);
+        this.board = new Board(this);
+        this._setBrainHooks();
         this._petIds.push(
             this.pet.on('clicked', () => this._petClicked()),
             this.pet.on('moved', frame => this.bubble?.follow(frame)),
@@ -143,6 +149,10 @@ export class App {
         this.onPrefChanged(name => {
             if (name === 'hiddenUntil')
                 this._updateVisibility();
+            if (name === 'lang')
+                setLang(this.prefs.effectiveLang);
+            // The board shows the pet's name, the focus length, the calendar, the shortcut and the language.
+            this.board?.refresh();
         });
         this._updateVisibility();
 
@@ -177,6 +187,13 @@ export class App {
         for (const id of this._brainIds)
             this.brain?.off(id);
         this._brainIds = [];
+        if (this.brain) {
+            this.brain.openBoard = null;
+            this.brain.openBreakdown = null;
+            this.brain.openSettings = null;
+        }
+        this.board?.destroy();
+        this.board = null;
         this.bubble?.destroy();
         this.bubble = null;
         this.brain?.stop();
@@ -250,15 +267,42 @@ export class App {
                     playChime(chime, this.prefs.soundMode);
             },
             ...secrets,
-            openURL,
+            openURL: launchURL,
+        };
+    }
+
+    // Opens a link in the default browser (the board's Todoist and Join links), without waiting.
+    openURL(url) {
+        launchURL(url);
+    }
+
+    // What the brain's bubbles and rules open (Swift: AppDelegate's brain.openBoard, openBreakdown, openSettings).
+    _setBrainHooks() {
+        const brain = this.brain;
+        brain.openBoard = focusAdd => this.board?.open({focusAdd});
+        brain.openBreakdown = task => {
+            this.board?.open();
+            this.board?.showPage('split', task);
+        };
+        brain.openSettings = () => {
+            this.board?.close();
+            try {
+                this.extension.openPreferences();
+            } catch (e) {
+                console.error(`TodoPet: could not open the settings: ${e?.message ?? e}`);
+            }
         };
     }
 
     _connectBrain() {
         const brain = this.brain;
         this._brainIds.push(
-            // A new mood or a celebration shows at once (between changes the pet repaints on its own).
-            brain.on('changed', () => this.pet?.poke()),
+            // A new mood or a celebration shows at once (between changes the pet repaints on its own). The open
+            // board draws the change too (throttled).
+            brain.on('changed', () => {
+                this.pet?.poke();
+                this.board?.refresh();
+            }),
             brain.on('celebrate', () => this.pet?.poke()),
             brain.on('bubble', bubble => this._onBubble(bubble)),
             brain.on('antic', antic => this._performAntic(antic)),
@@ -278,7 +322,7 @@ export class App {
             return;
         }
         const petVisible = Boolean(this.pet?.visible);
-        if (!shouldShowBubble({bubble, petVisible, boardOpen: Boolean(this.board?.isShown)})) {
+        if (!shouldShowBubble({bubble, petVisible, boardOpen: Boolean(this.board?.isOpen)})) {
             brain.dismissBubble(bubble.id);
             return;
         }
@@ -290,7 +334,7 @@ export class App {
     // or closes.
     updatePause() {
         if (this.pet)
-            this.pet.paused = Boolean(this.bubble?.visible) || Boolean(this.board?.isShown);
+            this.pet.paused = Boolean(this.bubble?.visible) || Boolean(this.board?.isOpen);
     }
 
     // The brain's mischief, played by the pet (Swift: AppDelegate.perform). Grumbling needs no movement.
@@ -303,8 +347,8 @@ export class App {
             this.pet.startBlock();
     }
 
-    // Swift: AppDelegate.petClicked. Clicking the pet calls off any mischief and takes away a bubble without buttons.
-    // Opening the task board comes with the board.
+    // Swift: AppDelegate.petClicked. Clicking the pet calls off any mischief, takes away a bubble without buttons and
+    // opens the task board (or closes it; while it is open a click outside it, on the pet too, already closes it).
     _petClicked() {
         const brain = this.brain;
         if (!brain)
@@ -314,6 +358,7 @@ export class App {
         const bubble = brain.bubble;
         if (bubble && bubble.actions.length === 0)
             brain.dismissBubble(bubble.id);
+        this.board?.toggle();
     }
 
     // The pet hides while the screen is locked and while `hidden-until` (epoch ms) is ahead.
@@ -322,10 +367,11 @@ export class App {
             return;
         const hidden = Boolean(this.session?.locked) || this.prefs.hiddenUntil > Date.now();
         if (hidden) {
-            // A bubble has no business on screen without the pet it points at.
+            // A bubble has no business on screen without the pet it points at; the board closes too (Swift: hidePet).
             const bubble = this.bubble?.bubble;
             if (bubble)
                 this.brain?.dismissBubble(bubble.id);
+            this.board?.close();
             this.pet.hide();
         } else {
             this.pet.show();

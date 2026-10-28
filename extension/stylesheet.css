@@ -157,3 +157,435 @@
 .todopet-bubble-dark .todopet-bubble-pill-primary:active {
     background-color: st-darken(-st-accent-color, 10%);
 }
+
+/* The task board (BoardView.swift, FrogCard, TaskRow, AddTaskRow, TokenSetupView; CalendarCard in PlanningViews.swift;
+   LifeBar in LifeViews.swift). Swift's sizes in points are px here: .body 13, .callout 12, .caption 11 (macOS 10 is
+   too small in Ubuntu Sans), the title 14. Colors are the macOS system colors Swift uses (green, orange, red, purple,
+   brown, yellow); buttons and links take the session's accent color. Light is the default; the root gets
+   .todopet-board-dark in a dark session. ui/board.js keeps the list's 220 px cap in code (it is scaled there). */
+.todopet-board {
+    width: 370px;
+    color: #242424;
+    font-size: 13px;
+    background-color: #ffffff;
+    border: 1px solid rgba(0, 0, 0, 0.14);
+    border-radius: 12px;
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.24);
+}
+
+.todopet-secondary { color: rgba(0, 0, 0, 0.5); }
+.todopet-primary { color: #242424; }
+.todopet-bold { font-weight: bold; }
+.todopet-tnum { font-feature-settings: "tnum"; }
+.todopet-callout { font-size: 12px; }
+.todopet-caption { font-size: 11px; }
+.todopet-headline { font-size: 13px; font-weight: bold; }
+.todopet-tone-green { color: #28a745; }
+.todopet-tone-orange { color: #f08c00; }
+.todopet-tone-red { color: #e5383b; }
+.todopet-tone-purple { color: #af52de; }
+.todopet-tone-brown { color: #a2845e; }
+
+.todopet-divider {
+    height: 1px;
+    background-color: rgba(0, 0, 0, 0.1);
+}
+
+/* Header: the little pet, the mood, the day's dots and the reason; the streak on the right. */
+.todopet-board-header {
+    padding: 10px 14px;
+    spacing: 10px;
+}
+
+.todopet-minipet {
+    width: 54px;
+    height: 54px;
+}
+
+.todopet-board-header-text { spacing: 3px; }
+
+.todopet-title {
+    font-size: 14px;
+    font-weight: bold;
+}
+
+.todopet-day { spacing: 4px; }
+
+.todopet-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 999px;
+    border: 1px solid rgba(0, 0, 0, 0.35);
+}
+
+.todopet-dot-done { background-color: #34c759; border-color: rgba(0, 0, 0, 0.2); }
+.todopet-dot-planned { background-color: rgba(0, 0, 0, 0.25); }
+.todopet-dot-open { border-color: rgba(0, 0, 0, 0.25); }
+
+.todopet-reason {
+    font-size: 11px;
+    font-weight: bold;
+}
+
+.todopet-streak-value {
+    font-size: 15px;
+    font-weight: bold;
+}
+
+.todopet-streak-label { font-size: 9px; }
+
+/* Life bar. */
+.todopet-life {
+    padding: 0 14px 8px 14px;
+    spacing: 6px;
+}
+
+.todopet-life-row { spacing: 10px; }
+.todopet-life-stage { spacing: 6px; }
+.todopet-life-item { spacing: 4px; }
+.todopet-emoji { font-size: 13px; }
+
+.todopet-progress {
+    height: 6px;
+    border-radius: 3px;
+    background-color: rgba(0, 0, 0, 0.1);
+}
+
+.todopet-progress-short { width: 54px; }
+
+.todopet-progress-fill { border-radius: 3px; }
+.todopet-progress-fill.todopet-tone-green { background-color: #34c759; }
+.todopet-progress-fill.todopet-tone-orange { background-color: #ff9500; }
+.todopet-progress-fill.todopet-tone-red { background-color: #ff3b30; }
+.todopet-progress-fill.todopet-tone-yellow { background-color: #ffcc00; }
+
+/* The body: the task view or the token setup. */
+.todopet-board-content {
+    padding: 14px;
+    spacing: 10px;
+}
+
+.todopet-demo { spacing: 6px; }
+.todopet-demo-icon { font-size: 13px; }
+
+.todopet-nag {
+    padding: 8px;
+    spacing: 8px;
+    border-radius: 8px;
+    background-color: rgba(255, 149, 0, 0.12);
+}
+
+/* Add row. */
+.todopet-add { spacing: 6px; }
+.todopet-add-top { spacing: 6px; }
+.todopet-add-bottom { spacing: 8px; }
+
+.todopet-entry {
+    padding: 5px 8px;
+    border-radius: 7px;
+    border: 1px solid rgba(0, 0, 0, 0.16);
+    font-size: 13px;
+    color: #242424;
+    background-color: #ffffff;
+    caret-color: #242424;
+    selected-color: #242424;
+}
+
+.todopet-entry:hover { background-color: #ffffff; color: #242424; }
+.todopet-entry:focus { color: #242424; background-color: #ffffff; }
+.todopet-entry StLabel.hint-text { color: rgba(0, 0, 0, 0.4); }
+
+.todopet-add-button .todopet-icon { icon-size: 18px; }
+.todopet-hint { font-size: 11px; }
+
+.todopet-segmented {
+    padding: 2px;
+    spacing: 2px;
+    border-radius: 7px;
+    background-color: rgba(0, 0, 0, 0.06);
+}
+
+.todopet-segment {
+    padding: 3px 7px;
+    border-radius: 5px;
+    font-size: 12px;
+    color: #242424;
+}
+
+.todopet-segment:hover { background-color: rgba(0, 0, 0, 0.05); }
+
+.todopet-segment:checked {
+    background-color: #ffffff;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.18);
+}
+
+.todopet-segment:focus { box-shadow: inset 0 0 0 2px st-transparentize(-st-accent-color, 0.4); }
+
+/* Frog and calendar cards. */
+.todopet-frog {
+    padding: 10px;
+    spacing: 10px;
+    border-radius: 10px;
+    background-color: rgba(52, 199, 89, 0.1);
+}
+
+.todopet-frog-icon { font-size: 22px; }
+.todopet-frog-text { spacing: 2px; }
+
+.todopet-frog-title {
+    font-size: 13px;
+    font-weight: bold;
+}
+
+.todopet-calendar {
+    padding: 10px;
+    spacing: 6px;
+    border-radius: 10px;
+    background-color: rgba(0, 122, 255, 0.08);
+}
+
+.todopet-meeting { spacing: 8px; }
+.todopet-calendar-icon { font-size: 18px; }
+.todopet-blocks-title { padding-top: 2px; }
+.todopet-block { spacing: 8px; }
+
+/* Buttons. */
+.todopet-pill {
+    padding: 5px 10px;
+    border-radius: 999px;
+    font-size: 12px;
+    font-weight: bold;
+    color: #242424;
+    background-color: rgba(0, 0, 0, 0.08);
+}
+
+.todopet-pill:hover,
+.todopet-pill:focus { background-color: rgba(0, 0, 0, 0.14); }
+.todopet-pill:active { background-color: rgba(0, 0, 0, 0.22); }
+
+.todopet-pill-primary,
+.todopet-pill-primary:hover,
+.todopet-pill-primary:focus,
+.todopet-pill-primary:active {
+    color: -st-accent-fg-color;
+    background-color: -st-accent-color;
+}
+
+.todopet-pill-primary:hover,
+.todopet-pill-primary:focus { background-color: st-lighten(-st-accent-color, 5%); }
+.todopet-pill-primary:active { background-color: st-darken(-st-accent-color, 10%); }
+
+.todopet-pill-big {
+    padding: 6px 14px;
+    font-size: 14px;
+}
+
+.todopet-pill:insensitive,
+.todopet-pill-primary:insensitive { color: rgba(0, 0, 0, 0.35); background-color: rgba(0, 0, 0, 0.06); }
+
+.todopet-link {
+    padding: 1px 2px;
+    border-radius: 4px;
+    color: -st-accent-color;
+}
+
+.todopet-link:hover,
+.todopet-link:focus { background-color: rgba(0, 0, 0, 0.05); }
+
+.todopet-plain-link { color: #242424; font-size: 11px; }
+.todopet-danger-link { color: #e5383b; font-size: 11px; }
+
+.todopet-icon-button {
+    padding: 3px;
+    border-radius: 6px;
+    color: rgba(0, 0, 0, 0.55);
+}
+
+.todopet-icon-button:hover,
+.todopet-icon-button:focus { background-color: rgba(0, 0, 0, 0.06); color: #242424; }
+.todopet-icon-button:active { background-color: rgba(0, 0, 0, 0.12); }
+.todopet-icon-button:insensitive,
+.todopet-plain-button:insensitive { color: rgba(0, 0, 0, 0.25); }
+.todopet-icon-button-box { spacing: 6px; }
+.todopet-icon { icon-size: 16px; }
+
+.todopet-plain-button {
+    padding: 2px 4px;
+    border-radius: 5px;
+    color: rgba(0, 0, 0, 0.5);
+}
+
+.todopet-plain-button:hover,
+.todopet-plain-button:focus { background-color: rgba(0, 0, 0, 0.06); }
+
+/* The task list. */
+.todopet-list { spacing: 2px; }
+
+.todopet-section {
+    padding-top: 6px;
+    spacing: 6px;
+}
+
+.todopet-section-title {
+    font-size: 11px;
+    font-weight: bold;
+}
+
+.todopet-empty { padding: 4px 0; }
+
+.todopet-task {
+    padding: 4px;
+    spacing: 4px;
+    border-radius: 6px;
+}
+
+.todopet-task:hover { background-color: rgba(0, 0, 0, 0.05); }
+.todopet-task-confirming,
+.todopet-task-confirming:hover { background-color: rgba(255, 59, 48, 0.07); }
+
+.todopet-task-line { spacing: 8px; }
+.todopet-task-text { spacing: 1px; }
+.todopet-task-title { font-size: 13px; }
+
+.todopet-task-meta {
+    spacing: 6px;
+    font-size: 11px;
+    color: rgba(0, 0, 0, 0.5);
+}
+
+.todopet-meta { spacing: 3px; }
+.todopet-meta.todopet-tone-red { color: #e5383b; }
+.todopet-meta.todopet-tone-orange { color: #f08c00; }
+.todopet-meta-icon { icon-size: 11px; }
+
+.todopet-task-actions { spacing: 2px; }
+.todopet-task-action .todopet-icon { icon-size: 13px; }
+.todopet-icon-button.todopet-danger { color: rgba(229, 56, 59, 0.8); }
+
+.todopet-check {
+    width: 15px;
+    height: 15px;
+    margin-top: 1px;
+    border-radius: 999px;
+    border: 1.5px solid rgba(0, 0, 0, 0.45);
+    color: rgba(0, 0, 0, 0.45);
+}
+
+.todopet-check:focus { box-shadow: 0 0 0 2px st-transparentize(-st-accent-color, 0.4); }
+.todopet-check-mark { icon-size: 11px; }
+.todopet-priority-1 { border-color: #d1453b; color: #d1453b; }
+.todopet-priority-2 { border-color: #eb8a0a; color: #eb8a0a; }
+.todopet-priority-3 { border-color: #2470e0; color: #2470e0; }
+
+.todopet-confirm {
+    padding-left: 24px;
+    spacing: 8px;
+}
+
+.todopet-done-toggle {
+    margin-top: 6px;
+    padding: 1px 2px;
+    border-radius: 4px;
+}
+
+.todopet-done-toggle:hover { background-color: rgba(0, 0, 0, 0.05); }
+.todopet-done-toggle-box { spacing: 4px; }
+.todopet-done-arrow { icon-size: 11px; color: #28a745; }
+.todopet-done-row { padding: 2px 4px; spacing: 8px; }
+.todopet-done-mark { icon-size: 14px; color: #28a745; }
+
+/* Token setup. */
+.todopet-setup {
+    padding: 14px;
+    spacing: 10px;
+}
+
+.todopet-setup-lang { spacing: 10px; }
+.todopet-setup-buttons { spacing: 8px; }
+
+/* Footer. */
+.todopet-board-footer {
+    padding: 9px 14px;
+    spacing: 12px;
+}
+
+.todopet-footer-focus { font-size: 14px; color: rgba(0, 0, 0, 0.55); padding: 3px 4px; }
+.todopet-footer-focus .todopet-icon { icon-size: 18px; }
+.todopet-footer-button .todopet-icon { icon-size: 18px; }
+
+/* Tooltips (Swift: .help). */
+.todopet-tooltip {
+    max-width: 300px;
+    padding: 5px 8px;
+    border-radius: 6px;
+    font-size: 11px;
+    color: #ffffff;
+    background-color: rgba(30, 30, 30, 0.92);
+}
+
+/* Dark. */
+.todopet-board-dark {
+    color: #f2f2f2;
+    background-color: #1f1f1f;
+    border-color: rgba(255, 255, 255, 0.14);
+}
+
+.todopet-board-dark .todopet-secondary,
+.todopet-board-dark .todopet-task-meta { color: rgba(255, 255, 255, 0.55); }
+.todopet-board-dark .todopet-primary,
+.todopet-board-dark .todopet-segment,
+.todopet-board-dark .todopet-pill,
+.todopet-board-dark .todopet-plain-link { color: #f2f2f2; }
+.todopet-board-dark .todopet-tone-green { color: #30d158; }
+.todopet-board-dark .todopet-tone-orange,
+.todopet-board-dark .todopet-meta.todopet-tone-orange { color: #ff9f0a; }
+.todopet-board-dark .todopet-tone-red,
+.todopet-board-dark .todopet-meta.todopet-tone-red,
+.todopet-board-dark .todopet-danger-link { color: #ff453a; }
+.todopet-board-dark .todopet-tone-purple { color: #bf5af2; }
+.todopet-board-dark .todopet-divider { background-color: rgba(255, 255, 255, 0.12); }
+.todopet-board-dark .todopet-dot { border-color: rgba(255, 255, 255, 0.4); }
+.todopet-board-dark .todopet-dot-planned { background-color: rgba(255, 255, 255, 0.3); }
+.todopet-board-dark .todopet-dot-open { border-color: rgba(255, 255, 255, 0.3); }
+.todopet-board-dark .todopet-progress { background-color: rgba(255, 255, 255, 0.14); }
+.todopet-board-dark .todopet-nag { background-color: rgba(255, 159, 10, 0.16); }
+.todopet-board-dark .todopet-frog { background-color: rgba(48, 209, 88, 0.14); }
+.todopet-board-dark .todopet-calendar { background-color: rgba(10, 132, 255, 0.16); }
+.todopet-board-dark .todopet-segmented { background-color: rgba(255, 255, 255, 0.08); }
+.todopet-board-dark .todopet-segment:hover { background-color: rgba(255, 255, 255, 0.06); }
+.todopet-board-dark .todopet-segment:checked { background-color: rgba(255, 255, 255, 0.2); box-shadow: none; }
+.todopet-board-dark .todopet-pill { background-color: rgba(255, 255, 255, 0.12); }
+.todopet-board-dark .todopet-pill:hover,
+.todopet-board-dark .todopet-pill:focus { background-color: rgba(255, 255, 255, 0.2); }
+.todopet-board-dark .todopet-pill-primary,
+.todopet-board-dark .todopet-pill-primary:active { color: -st-accent-fg-color; background-color: -st-accent-color; }
+.todopet-board-dark .todopet-pill-primary:hover,
+.todopet-board-dark .todopet-pill-primary:focus { background-color: st-lighten(-st-accent-color, 5%); }
+.todopet-board-dark .todopet-icon-button,
+.todopet-board-dark .todopet-footer-focus,
+.todopet-board-dark .todopet-plain-button { color: rgba(255, 255, 255, 0.6); }
+.todopet-board-dark .todopet-icon-button:hover,
+.todopet-board-dark .todopet-icon-button:focus { background-color: rgba(255, 255, 255, 0.08); color: #f2f2f2; }
+.todopet-board-dark .todopet-icon-button:insensitive,
+.todopet-board-dark .todopet-plain-button:insensitive { color: rgba(255, 255, 255, 0.25); }
+.todopet-board-dark .todopet-pill:insensitive,
+.todopet-board-dark .todopet-pill-primary:insensitive { color: rgba(255, 255, 255, 0.35); background-color: rgba(255, 255, 255, 0.06); }
+.todopet-board-dark .todopet-link:hover,
+.todopet-board-dark .todopet-task:hover,
+.todopet-board-dark .todopet-done-toggle:hover { background-color: rgba(255, 255, 255, 0.06); }
+.todopet-board-dark .todopet-task-confirming { background-color: rgba(255, 69, 58, 0.12); }
+.todopet-board-dark .todopet-check { border-color: rgba(255, 255, 255, 0.5); color: rgba(255, 255, 255, 0.5); }
+.todopet-board-dark .todopet-check.todopet-priority-1 { border-color: #d1453b; color: #d1453b; }
+.todopet-board-dark .todopet-check.todopet-priority-2 { border-color: #eb8a0a; color: #eb8a0a; }
+.todopet-board-dark .todopet-check.todopet-priority-3 { border-color: #2470e0; color: #2470e0; }
+.todopet-board-dark .todopet-tooltip { background-color: rgba(70, 70, 70, 0.95); }
+.todopet-board-dark .todopet-entry,
+.todopet-board-dark .todopet-entry:hover,
+.todopet-board-dark .todopet-entry:focus {
+    color: #f2f2f2;
+    background-color: rgba(255, 255, 255, 0.06);
+    border-color: rgba(255, 255, 255, 0.18);
+    caret-color: #f2f2f2;
+    selected-color: #f2f2f2;
+}
+.todopet-board-dark .todopet-entry StLabel.hint-text { color: rgba(255, 255, 255, 0.4); }
