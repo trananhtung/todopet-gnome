@@ -12,7 +12,7 @@
 // 'antic-ended' when a parade or a perch is over (the app tells the brain).
 //
 // Repaints come from a Clutter.Timeline at about 30 fps while the pet moves or animates, from a 250 ms timeout
-// (4 fps) while it stands still, and stop while it is hidden.
+// (4 fps) while it stands still, and stop while it is hidden (ui/frameRate.js decides which).
 import Clutter from 'gi://Clutter';
 import GLib from 'gi://GLib';
 import GObject from 'gi://GObject';
@@ -22,6 +22,7 @@ import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import {decoratePose, drawPet} from '../art/petArt.js';
 import {Emitter} from '../core/emitter.js';
 import {Mood} from '../core/mood.js';
+import {loopMode} from './frameRate.js';
 import {petSize} from './geometry.js';
 import {PetWalker} from './walker.js';
 
@@ -76,12 +77,14 @@ export class PetActor extends Emitter {
         this._slowId = 0;
         this._lastFrame = -Infinity;
         this._press = null; // {x, y, originX, originY, dragging}
+        this._hoverSince = null; // monotonic seconds when the pointer came onto the pet
         this._grab = null;
         this._grabId = 0;
         this._shownX = null;
         this._shownY = null;
         this._paintedMood = null;
         this._paintedBlend = 1;
+        this._paints = 0;
         this._errors = new Set();
         this._signals = [];
         this._sized = false;
@@ -96,7 +99,7 @@ export class PetActor extends Emitter {
         this._connect(this.actor, 'motion-event', (_a, event) => this._onMotion(event));
         this._connect(this.actor, 'button-release-event', (_a, event) => this._onRelease(event));
         this._connect(this.actor, 'notify::hover', () => {
-            this._walker.motion.hovered = this.actor.hover;
+            this._setHovered(this.actor.hover);
             this._updateLoop();
         });
         this._connect(this.actor, 'notify::mapped', () => {
@@ -168,6 +171,11 @@ export class PetActor extends Emitter {
         return this._chip?.visible ? this._chip.text : null;
     }
 
+    // How many frames were drawn so far (the scenes check the frame rate with it).
+    get paints() {
+        return this._paints;
+    }
+
     walkTo(x) {
         this._walker.walkTo(x);
         this._updateLoop();
@@ -183,7 +191,7 @@ export class PetActor extends Emitter {
         this._place(true);
         // `hover` may still hold what it was when the pet was hidden.
         this.actor.sync_hover();
-        this._walker.motion.hovered = this.actor.hover;
+        this._setHovered(this.actor.hover);
         this.actor.queue_repaint();
         this._updateLoop();
     }
@@ -194,7 +202,7 @@ export class PetActor extends Emitter {
         this._cancelPress();
         Main.layoutManager.removeChrome(this.actor);
         this._shown = false;
-        this._walker.motion.hovered = false;
+        this._setHovered(false);
         this._updateLoop();
     }
 
@@ -276,17 +284,22 @@ export class PetActor extends Emitter {
     }
 
     _wantedLoop() {
-        if (!this._shown || !this.actor?.mapped)
-            return 'off';
-        return this._animating() ? 'fast' : 'slow';
+        return loopMode({
+            shown: this._shown && Boolean(this.actor?.mapped),
+            moving: this._walker.active,
+            hoveredFor: this._hoverSince === null ? null : monotonicSeconds() - this._hoverSince,
+            mood: this._app.brain?.mood ?? Mood.normal,
+            paintedMood: this._paintedMood,
+            blend: this._paintedBlend,
+        });
     }
 
-    // Moving, in your hand, under the pointer, celebrating or blending into a new mood's colors.
-    _animating() {
-        if (this._walker.active || this._walker.motion.hovered || this._press)
-            return true;
-        const mood = this._app.brain?.mood ?? Mood.normal;
-        return mood === Mood.celebrating || mood !== this._paintedMood || this._paintedBlend < 1;
+    _setHovered(hovered) {
+        if (hovered && this._hoverSince === null)
+            this._hoverSince = monotonicSeconds();
+        else if (!hovered)
+            this._hoverSince = null;
+        this._walker.motion.hovered = hovered;
     }
 
     _stopLoop() {
@@ -328,6 +341,7 @@ export class PetActor extends Emitter {
     }
 
     _paint(area) {
+        this._paints += 1;
         const cr = area.get_context();
         try {
             const [width, height] = area.get_surface_size();
@@ -473,6 +487,7 @@ export class PetActor extends Emitter {
         if (!press.dragging && Math.hypot(x - press.x, y - press.y) > DRAG_THRESHOLD * this._walker.unit) {
             press.dragging = true;
             this._walker.grab();
+            this._updateLoop();
         }
         if (press.dragging) {
             this._walker.dragTo(press.originX + x - press.x, press.originY + y - press.y);

@@ -106,8 +106,11 @@ export class PetWalker {
             workArea.y + workArea.height - 200 * this.unit - this.size);
     }
 
+    // Walks to `x`. The calm state is read again on the next step: an asked-for walk must not be lost to a reading
+    // up to 0.5 s old (a walk the pet chooses itself trusts that reading, as in Swift).
     walkTo(x) {
         this.behavior = {kind: 'walk', toX: x};
+        this._lastCalmCheck = -Infinity;
     }
 
     // Picked up by the pointer: legs still, the pet follows dragTo().

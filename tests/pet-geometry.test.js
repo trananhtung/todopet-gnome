@@ -1,4 +1,5 @@
 import {PetWalker} from '../extension/ui/walker.js';
+import {HOVER_FAST_SECONDS, loopMode} from '../extension/ui/frameRate.js';
 import {clampToWorkArea, groundY, petSize} from '../extension/ui/geometry.js';
 
 // The nested shell's work area: a 1600×900 monitor under a 32 px top bar.
@@ -47,6 +48,23 @@ export default async function (t) {
     t.eq(petSize(1.5, 2), 372, 'size grows with the pet scale and the stage scale');
     t.eq([petSize(0.1, 1), petSize(5, 1)], [74, 248], 'the pet scale is clamped to 0.6–2.0, as in Swift');
     t.eq(petSize(Number.NaN, 1), 124, 'a pet scale that is not a number counts as 1');
+
+    // --- frameRate.js: the animation budget ---
+    {
+        const still = {shown: true, moving: false, hoveredFor: null, mood: 'normal', paintedMood: 'normal', blend: 1};
+        t.eq(loopMode(still), 'slow', 'standing still: the slow loop (4 fps)');
+        t.eq(loopMode({...still, shown: false}), 'off', 'hidden (or unmapped): no loop');
+        t.eq(loopMode({...still, shown: false, moving: true}), 'off', 'hidden wins over moving');
+        t.eq(loopMode({...still, moving: true}), 'fast', 'moving: the fast loop (30 fps)');
+        t.eq(loopMode({...still, hoveredFor: 0}), 'fast', 'the pointer just came onto the pet: fast for the petted look');
+        t.eq(loopMode({...still, hoveredFor: HOVER_FAST_SECONDS - 0.01}), 'fast', 'for a short while');
+        t.eq(loopMode({...still, hoveredFor: HOVER_FAST_SECONDS}), 'slow', 'a pet under a parked pointer drops to 4 fps');
+        t.check(HOVER_FAST_SECONDS >= 1.7 && HOVER_FAST_SECONDS <= 3,
+            `the fast hover lasts one rise of the heart (1.7 s) and not much more (${HOVER_FAST_SECONDS} s)`);
+        t.eq(loopMode({...still, mood: 'celebrating', paintedMood: 'celebrating'}), 'fast', 'celebrating: fast');
+        t.eq(loopMode({...still, mood: 'happy'}), 'fast', 'a mood not painted yet: fast (its colors blend in)');
+        t.eq(loopMode({...still, blend: 0.5}), 'fast', 'while the colors blend: fast');
+    }
 
     // --- walker.js: PetController.step/chooseNext/speed/idleTime ---
     {
@@ -126,12 +144,14 @@ export default async function (t) {
         t.eq([w.x, w.behavior.kind], [800, 'idle'], 'while you type the pet does not wander off');
         t.near(w.behavior.until, FRAME + 0.8 + 2, 0.05, 'it looks again 2 s later');
         t.eq(reads, 4, 'the calm state is read every 0.5 s, not on every frame');
-        w.walkTo(500);
+        // A walk the pet chose itself trusts the last reading (at most 0.5 s old).
+        w.behavior = {kind: 'walk', toX: 500};
         w.step(2.05, input());
-        t.eq(w.behavior.kind, 'idle', 'a walk stops while the last reading says calm');
+        t.eq([w.behavior.kind, w.motion.calm], ['idle', true], 'a walk under way stops while the last reading says calm');
+        // An asked-for walk (walkTo) reads the calm state again on the next step, so it is not lost to a stale reading.
         w.walkTo(500);
-        w.step(2.3, input());
-        t.eq(w.behavior.kind, 'walk', 'once calm is over, it walks again');
+        w.step(2.1, input());
+        t.eq([w.behavior.kind, w.motion.calm], ['walk', false], 'walkTo reads the calm state again at once');
     }
 
     {

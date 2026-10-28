@@ -276,6 +276,7 @@ registerScene('walk', ctx => withPet(ctx, Mood.normal, async pet => {
     await untilOnGround(ctx, pet);
     pet.walkTo(farSide(pet));
     await ctx.wait(500);
+    expect(pet.motion.walking, `the pet should be walking: ${describePet(pet)}`);
     const first = pet.frame;
     await ctx.shot('walk-1');
     await ctx.wait(2000);
@@ -287,7 +288,16 @@ registerScene('walk', ctx => withPet(ctx, Mood.normal, async pet => {
     expect(first.y === pet.ground && second.y === pet.ground, 'the pet is not on the ground while it walks');
 }));
 
-// The pointer on a walking pet: it stops and gets the petted look.
+// Frames the pet drew per second over the next `ms`.
+async function paintRate(ctx, pet, ms) {
+    const start = GLib.get_monotonic_time();
+    const paints = pet.paints;
+    await ctx.wait(ms);
+    return (pet.paints - paints) / ((GLib.get_monotonic_time() - start) / 1e6);
+}
+
+// The pointer on a walking pet: it stops and gets the petted look, drawn at the full rate at first; under the
+// parked pointer it then sits still at 4 fps (the animation budget).
 registerScene('hover', ctx => withPet(ctx, Mood.normal, async (pet, pointer) => {
     await untilOnGround(ctx, pet);
     pet.walkTo(farSide(pet));
@@ -295,7 +305,9 @@ registerScene('hover', ctx => withPet(ctx, Mood.normal, async (pet, pointer) => 
     expect(pet.motion.walking, `the pet should be walking before the hover: ${describePet(pet)}`);
     const {x, y, width, height} = pet.frame;
     pointer.moveTo(x + width / 2, y + height * 0.6);
-    await ctx.wait(800);
+    const hoverStart = GLib.get_monotonic_time();
+    await ctx.wait(200);
+    const early = await paintRate(ctx, pet, 1000);
     const before = pet.frame;
     await ctx.wait(500);
     const after = pet.frame;
@@ -303,6 +315,14 @@ registerScene('hover', ctx => withPet(ctx, Mood.normal, async (pet, pointer) => 
     expect(pet.hovered, 'the pointer is on the pet but it is not hovered');
     expect(!pet.motion.walking && before.x === after.x, 'the pet keeps walking under the pointer');
     await ctx.shot('hover');
+    const hoveredMs = (GLib.get_monotonic_time() - hoverStart) / 1000;
+    await ctx.wait(Math.max(0, 3000 - hoveredMs));
+    const late = await paintRate(ctx, pet, 3000);
+    console.log(`TODOPET hover paints/s: ${early.toFixed(1)} in the first second, ${late.toFixed(1)} from 3 s to 6 s`);
+    expect(pet.hovered, 'the pointer left the pet');
+    expect(early >= 15, `the petted look is not drawn at the full rate (${early.toFixed(1)} paints/s)`);
+    // The slow loop draws 4 frames a second; a change in the brain (a sync, the mood) adds a repaint of its own.
+    expect(late <= 6, `a pet under a parked pointer still repaints ${late.toFixed(1)} times a second`);
 }));
 
 // Picks the pet up, lifts it 300 px, lets go: it falls back onto the ground.
