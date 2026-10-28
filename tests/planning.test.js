@@ -5,7 +5,7 @@ import {
     suggest, targetFor,
 } from '../extension/core/calendarMath.js';
 import {StuckTracker, stuckDays} from '../extension/core/stuck.js';
-import {isBrowser, matchTitle, titleKeywords} from '../extension/core/sites.js';
+import {isBrowser, matchTitle, stripBrowserName, titleKeywords} from '../extension/core/sites.js';
 
 const MINUTE = 60_000;
 const HOUR = 3_600_000;
@@ -428,6 +428,63 @@ export default async function (t) {
     t.eq(matchTitle('YouTube', ['', '/shorts', 5, null, 'youtube.com']), 'youtube.com', 'unusable rules are skipped');
     t.eq(matchTitle('Sitee is here', ['site+.com']), null, 'regex characters in a rule are taken literally');
     t.eq(matchTitle('Site+ is here', ['site+.com']), 'site+.com', 'a rule with a plus matches the plus literally');
+
+    // --- The browser's own name in the window title must not count as page text ---
+    const ZW = '\u200B'; // Edge writes "Microsoft<ZWSP> Edge"
+    const browserTitles = [
+        ['Inbox (3) - Gmail - Google Chrome', 'mail.google.com'],
+        ['Inbox - Google Chrome', 'google.com'],
+        ['Inbox - Google Chrome', 'chrome.com'],
+        ['Docs \u2014 Mozilla Firefox', 'mozilla.org'],
+        ['Docs \u2014 Mozilla Firefox', 'firefox.com'],
+        [`Chat - Microsoft${ZW} Edge`, 'teams.microsoft.com'],
+        [`Chat - Microsoft${ZW} Edge`, 'edge.com'],
+        ['Chat - Microsoft Edge', 'microsoft.com'],
+        ['News - Opera', 'opera.com'],
+        ['News - Brave', 'brave.com'],
+        ['Docs - Chromium', 'chromium.org'],
+        ['News - Vivaldi', 'vivaldi.com'],
+        ['Inbox - Google Chrome - Work', 'google.com'],
+        ['Inbox - Google Chrome \u2013 Person 1', 'google.com'],
+        ['Docs \u2014 Mozilla Firefox Private Browsing', 'mozilla.org'],
+        [`Page and 5 more pages - Personal - Microsoft${ZW} Edge`, 'microsoft.com'],
+        ['Tin m\u1EDBi - C\u1ED1c C\u1ED1c', 'coc.vn'],
+        ['Mozilla Firefox', 'mozilla.org'],
+        ['Mozilla Firefox Private Browsing', 'firefox.com'],
+        ['Google Chrome', 'google.com'],
+    ];
+    for (const [title, rule] of browserTitles)
+        t.eq(matchTitle(title, [rule]), null, `the browser's own name in ${JSON.stringify(title)} is not matched by ${rule}`);
+    t.eq(matchTitle('Tin m\u1EDBi - Co\u0302\u0301c Co\u0302\u0301c', ['c\u1ED1c.vn']), null,
+        'the Coc Coc name is found in decomposed form too');
+
+    t.eq(matchTitle('Lofi - YouTube - Google Chrome - Work', ['youtube.com']), 'youtube.com',
+        'the page is still matched when the browser adds a profile name');
+    t.eq(matchTitle(`Lofi - YouTube - Microsoft${ZW} Edge`, ['youtube.com']), 'youtube.com', 'the page is still matched in Edge');
+    t.eq(matchTitle('Lofi \u2014 YouTube \u2014 Mozilla Firefox Private Browsing', ['youtube.com']), 'youtube.com',
+        'the page is still matched in a private Firefox window');
+    t.eq(matchTitle('Gin - Opera - YouTube \u2014 Mozilla Firefox', ['youtube.com']), 'youtube.com',
+        'only the last browser name is cut, a page title with a browser name inside keeps its end');
+    t.eq(matchTitle('Opera tickets - Ticketbox', ['opera.com']), 'opera.com', 'a page about Opera is still matched');
+    t.eq(matchTitle('Brave New World trailer - YouTube', ['youtube.com']), 'youtube.com',
+        'a title that starts like a browser name is left alone');
+    t.eq(matchTitle('Watch Brave New World - YouTube - Brave', ['brave.com']), 'brave.com',
+        'the page text is matched even when it says the browser name');
+    t.eq(matchTitle('Calendar - Google Chrome', ['google.com', 'chrome.com']), null, 'no rule matches the name of the browser');
+    t.eq(matchTitle('Mail - Google Chrome', ['mail.com']), 'mail.com', 'a rule that matches the page text still matches');
+
+    t.eq([
+        'Inbox - Google Chrome', 'Inbox - Google Chrome - Work', 'Inbox \u2014 Mozilla Firefox', 'Inbox \u2013 Firefox Developer Edition',
+        `Inbox - Microsoft${ZW} Edge`, 'Inbox - Opera', 'Inbox - Brave', 'Inbox - Chromium', 'Inbox - Vivaldi', 'Inbox - C\u1ED1c C\u1ED1c',
+        'Inbox - google chrome',
+    ].map(stripBrowserName), new Array(11).fill('Inbox'), 'the browser name and what follows it are cut from the title');
+    t.eq(['Mozilla Firefox', 'Google Chrome', 'Mozilla Firefox Private Browsing', 'Mozilla Firefox (Private Browsing)']
+        .map(stripBrowserName), ['', '', '', ''], 'a title that is only the browser name becomes empty');
+    t.eq(['Lofi - YouTube', 'Opera tickets', 'Brave New World', 'Inbox - Operatic', 'Inbox - Bravery', 'Google Docs', '']
+        .map(stripBrowserName), ['Lofi - YouTube', 'Opera tickets', 'Brave New World', 'Inbox - Operatic', 'Inbox - Bravery',
+        'Google Docs', ''], 'titles without a browser name stay as they are');
+    t.eq(stripBrowserName('Gin - Opera - YouTube - Opera'), 'Gin - Opera - YouTube', 'only the last browser name is cut');
+    t.eq(stripBrowserName('Inbox\u00A0- Google Chrome'), 'Inbox', 'a non-breaking space before the dash still counts as a separator');
 
     t.eq(['firefox', 'Firefox', 'org.mozilla.firefox', 'Google-chrome', 'google-chrome-beta', 'chromium', 'Chromium-browser',
         'brave-browser', 'Brave-browser', 'microsoft-edge', 'vivaldi-stable', 'opera', 'coccoc'].map(isBrowser),
