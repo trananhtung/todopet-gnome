@@ -474,13 +474,13 @@ export class Brain extends Emitter {
         const run = this._sync(this.todo, gen).finally(() => {
             if (this._refreshing === run) {
                 this._refreshing = null;
-                this.loading = false;
+                this._setLoading(false);
             }
         });
         this._refreshing = run;
         this._refreshingGen = gen;
-        this.loading = true;
         this._track(run);
+        this._setLoading(true);
         return run;
     }
 
@@ -1183,6 +1183,14 @@ export class Brain extends Emitter {
 
     _changed() {
         this.emit('changed');
+    }
+
+    // The board shows a spinner while a sync runs, so both edges are announced.
+    _setLoading(value) {
+        if (this.loading === value)
+            return;
+        this.loading = value;
+        this._changed();
     }
 
     // Unexpected problems go to the journal. Tests replace this to see them.

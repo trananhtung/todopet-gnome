@@ -108,6 +108,13 @@ async function syncErrors(t) {
     r.tick(at('2026-10-27T11:06:45')); await r.settle();
     t.check(r.todo.reads.length > reads && r.errorText === null, 'and then syncs again');
     t.eq(r.diary.today.filter(e => e.kind === 'sync').length, 1, 'sync errors are written to the diary at most every 30 minutes');
+
+    const l = makeBrain({active: [task('a', '2026-10-27')]});
+    await l.start(); await l.settle();
+    const seen = [];
+    l.on('changed', () => seen.push(l.loading));
+    await l.refresh();
+    t.check(seen.length > 0 && seen[0] === true && seen.at(-1) === false && !l.loading, 'listeners see loading end');
 }
 
 async function moodContext(t) {
