@@ -31,6 +31,7 @@ export default async function (t) {
         await keyring(t);
         await editing(t);
         await completing(t);
+        await staleSync(t);
         await adding(t);
         await splitting(t);
         await focus(t);
@@ -213,6 +214,65 @@ async function completing(t) {
     v.fakeTodo.completed = closed;
     await v.refresh();
     t.eq(v.life.state.totalDone, 1, 'a completion Todoist reports late is not fed twice');
+}
+
+// The final review: Board.open() starts a sync; a task ticked off while it is in flight must not come back with the
+// sync's list (from before the tick), or a second tick would feed the pet twice.
+async function staleSync(t) {
+    const s = makeBrain({active: [task('a', TODAY, 4), task('b', TODAY)]});
+    await s.start(); await s.refresh();
+    const fed = s.life.state.totalDone;
+    const a = s.day.today.find(v => v.id === 'a');
+    const release = s.fakeTodo.holdSync();
+    const sync = s.refresh();
+    s.complete(a);
+    await Promise.resolve();
+    release();
+    await sync; await s.settle();
+    t.check(s.fakeTodo.reads.length > 0 && !s.fakeTodo.active.some(v => v.id === 'a'),
+        'the sync read the list from before the tick, and Todoist has closed the task since');
+    t.check(!s.day.open.some(v => v.id === 'a') && s.day.completed.some(v => v.id === 'a'),
+        'the stale sync does not bring the ticked task back: it stays done');
+    s.complete(a); await s.settle();
+    t.eq([s.life.state.totalDone, s.fakeTodo.calls.filter(c => c[0] === 'close').length], [fed + 1, 1],
+        'a second tick of the same task is ignored: fed once, closed once');
+    await s.refresh();
+    t.check(!s.day.open.some(v => v.id === 'a') && s.day.completed.filter(v => v.id === 'a').length === 1 &&
+        s.life.state.totalDone === fed + 1, 'the next sync shows it done, once, and feeds nothing more');
+
+    // Todoist's completed list lags behind the close: the tick still stands. Reopened in the Todoist app: it is open.
+    const l = makeBrain({active: [task('a', TODAY)]});
+    await l.start(); await l.refresh();
+    l.complete(l.day.today[0]); await l.settle();
+    const closed = l.fakeTodo.completed;
+    l.fakeTodo.completed = [];
+    await l.refresh();
+    t.check(!l.day.open.some(v => v.id === 'a') && l.day.completed.some(v => v.id === 'a'),
+        'a close the completed list does not show yet stays done');
+    l.fakeTodo.completed = closed;
+    await l.refresh();
+    const [reopened] = l.fakeTodo.completed.splice(0, 1);
+    l.fakeTodo.active.push(task(reopened.id, TODAY));
+    await l.refresh();
+    t.check(l.day.open.some(v => v.id === 'a') && !l.day.completed.some(v => v.id === 'a'),
+        'a task reopened in the Todoist app after the close is open again');
+    l.complete(l.day.today[0]); await l.settle();
+    t.check(l.fakeTodo.calls.filter(c => c[0] === 'close').length === 2 && !l.day.open.some(v => v.id === 'a'),
+        'and can be ticked off again');
+
+    // Undo, and a close Todoist refuses, let the task go: the next sync shows it open.
+    const u = makeBrain({active: [task('a', TODAY)]});
+    await u.start(); await u.refresh();
+    u.complete(u.day.today[0]); await u.settle();
+    u.undoComplete(u.day.completed[0]); await u.settle();
+    await u.refresh();
+    t.check(u.day.open.some(v => v.id === 'a') && !u.day.completed.some(v => v.id === 'a'), 'after Undo a sync shows the task open');
+    u.fakeTodo.failWith('network');
+    u.complete(u.day.today[0]); await u.settle();
+    u.fakeTodo.failWith(null);
+    await u.refresh();
+    t.check(u.day.open.some(v => v.id === 'a') && !u.day.completed.some(v => v.id === 'a'),
+        'after a refused close a sync shows the task open');
 }
 
 async function adding(t) {

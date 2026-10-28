@@ -62,9 +62,11 @@ class ActionMethods {
     // --- Actions ---
 
     // Ticks a task off: the pet eats and dances right away; if Todoist refuses, the task comes back and the meal goes.
+    // A task already ticked off here (a second click, a row from before the last sync) is not eaten twice; the brain
+    // keeps it done until Todoist's lists show the close (_heldTicks).
     complete(task) {
         const service = this.todo;
-        if (!service)
+        if (!service || this._ticks.has(task.id))
             return;
         const now = this._now();
         this.active = this.active.filter(t => t.id !== task.id);
@@ -72,13 +74,18 @@ class ActionMethods {
         this.completed = [done, ...this.completed];
         this.completedViaPet.add(task.id);
         this.knownCompleted.add(task.id);
+        const tick = {task: done, closedAfter: null};
+        this._ticks.set(task.id, tick);
         if (this.focusSession?.task?.id === task.id && !this.focusSession.isBreak)
             this._setFocus(null);
         this._celebrate(done, true, 1, now);
         this._track((async () => {
             try {
                 await service.close(task.id);
+                tick.closedAfter = this._syncCount;
             } catch (e) {
+                if (this._ticks.get(task.id) === tick)
+                    this._ticks.delete(task.id);
                 if (!this._live(service))
                     return;
                 this.errorText = errorMessage(e);
@@ -97,6 +104,7 @@ class ActionMethods {
         if (!service)
             return;
         this.life.mutate(s => LifeRules.unfeed(s));
+        this._ticks.delete(task.id);
         this.completed = this.completed.filter(t => t.id !== task.id);
         this.active = [...this.active, new Task({...task, checked: false, completedAt: null})];
         this.lastCelebration = NEVER;

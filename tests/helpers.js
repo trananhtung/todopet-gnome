@@ -170,6 +170,7 @@ const copyTask = t => new Task(t);
 // `calls` records every change as [method, arg] (reads are in `reads`, so `calls.at(-1)` is the last change even
 // after the brain refreshed). `completeRemotely(id)` finishes a task as if in the Todoist app; `failWith(kind)` makes
 // every call reject with that TodoError kind (null: work again). `token` is what the brain's factory was given.
+// `holdSync()` makes the next sync a slow one: see there.
 export class FakeTodo {
     constructor({active = [], completed = [], error = null, now = () => new Date()} = {}) {
         this.active = active.map(copyTask);
@@ -184,6 +185,26 @@ export class FakeTodo {
 
     failWith(kind) {
         this._error = kind ?? null;
+    }
+
+    // The next sync reads the lists as they are now, but its activeTasks() answers only once the returned function
+    // is called: a sync that was in flight while the pet changed something.
+    holdSync() {
+        const then = new FakeTodo({active: this.active, completed: this.completed, now: this._now});
+        let release;
+        const answered = new Promise(resolve => {
+            release = resolve;
+        });
+        this.activeTasks = async filter => {
+            delete this.activeTasks;
+            await answered;
+            return then.activeTasks(filter);
+        };
+        this.completedTasks = (since, until) => {
+            delete this.completedTasks;
+            return then.completedTasks(since, until);
+        };
+        return release;
     }
 
     completeRemotely(id) {
