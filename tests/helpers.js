@@ -80,3 +80,28 @@ export function sleep(ms) {
         });
     });
 }
+
+// A scripted stand-in for services/http.js's SoupTransport: `request(req)` records `req` in `calls`, then
+// plays the next script item. {status, text} resolves with that response; {throws: message} rejects with an
+// Error named 'NetworkError' (what SoupTransport throws when the network or TLS fails). Asking for more
+// responses than the script holds rejects with a plain Error that says so, so a test that makes an
+// unplanned request fails loudly instead of hanging or passing by accident.
+export class FakeTransport {
+    constructor(script = []) {
+        this._script = [...script];
+        this.calls = [];
+    }
+
+    async request(req) {
+        this.calls.push(req);
+        const item = this._script.shift();
+        if (item === undefined)
+            throw new Error(`FakeTransport: the script is used up (unplanned request ${this.calls.length}: ${req.method} ${req.url})`);
+        if (item.throws !== undefined) {
+            const error = new Error(item.throws);
+            error.name = 'NetworkError';
+            throw error;
+        }
+        return {status: item.status, text: item.text ?? ''};
+    }
+}

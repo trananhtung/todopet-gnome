@@ -12,6 +12,7 @@ const TESTS = [
     './planning.test.js',
     './diary-lines.test.js',
     './store.test.js',
+    './services.test.js',
 ];
 
 const t = new T();
