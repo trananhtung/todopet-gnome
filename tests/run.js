@@ -15,6 +15,7 @@ const TESTS = [
     './services.test.js',
     './platform.test.js',
     './art.test.js',
+    './brain-core.test.js',
 ];
 
 const t = new T();
