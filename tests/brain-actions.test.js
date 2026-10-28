@@ -92,6 +92,16 @@ async function keyring(t) {
     n.tick(at('2026-10-27T11:00:22'));
     t.check(titles(n)?.includes('Try demo') && !n.hasToken, 'once the keyring answers without a token, the hello comes');
 
+    // Only the Claude key cannot be read: the keyring is retried every slow tick, but the token was read (none).
+    const h = makeBrain({token: null, env: {secretsFail: [SECRET_ANTHROPIC]}});
+    h._log = () => {};
+    await h.start();
+    for (let i = 1; i <= 120; i++) {
+        h.tick(new Date(at('2026-10-27T11:00').getTime() + i * 1000));
+        await h.settle();
+    }
+    t.eq(h.diary.today.filter(e => e.tag === 'askToken').length, 1, 'an unreadable Claude key does not repeat the hello');
+
     const s = makeBrain({});
     s._log = () => {};
     await s.start(); await s.settle();

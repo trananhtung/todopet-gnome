@@ -482,12 +482,13 @@ export class Brain extends Emitter {
         this._log(`TodoPet: could not read ${what} from the keyring, trying again every 15 s: ${e?.message ?? e}`);
     }
 
-    // The slow tick's new try at a keyring that could not be read. Once it answers without a token, the hello
-    // that start() held back comes.
+    // The slow tick's new try at a keyring that could not be read. Once a token that could not be read turns out to
+    // be missing, the hello that start() held back comes. A retry only for the Claude key never says hello again.
     async _retrySecrets() {
+        const tokenWasUnread = this._tokenUnread;
         try {
             await this.reloadSecrets();
-            if (!this._stopped && !this._tokenUnread && !this.hasToken && this._askTokenAt === null)
+            if (!this._stopped && tokenWasUnread && !this._tokenUnread && !this.hasToken && this._askTokenAt === null)
                 this._askTokenAt = new Date(this._now().getTime() + ASK_TOKEN_DELAY_MS);
         } finally {
             this._keyringRetry = null;
