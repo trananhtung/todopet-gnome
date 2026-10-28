@@ -10,6 +10,7 @@ const TESTS = [
     './mood-calm.test.js',
     './life.test.js',
     './planning.test.js',
+    './diary-lines.test.js',
 ];
 
 const t = new T();
