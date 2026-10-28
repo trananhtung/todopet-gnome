@@ -4,11 +4,13 @@
 //
 // A scene is registered with registerScene(id, async ctx => ...). Modules that register scenes must be
 // imported (statically) from here so that registering happens before runScenes() looks an id up.
+import Clutter from 'gi://Clutter';
 import GLib from 'gi://GLib';
 import Gio from 'gi://Gio';
 import Shell from 'gi://Shell';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
+import {Mood} from '../core/mood.js';
 import {hasSpeech} from '../services/speech.js';
 
 Gio._promisify(Gio.File.prototype, 'replace_async', 'replace_finish');
@@ -190,4 +192,187 @@ registerScene('services', async ctx => {
     await Promise.all(services.map(service => service.start()));
     await ctx.wait(1000);
     console.log(`TODOPET services restarted ${line()}`);
+});
+
+// --- The pet (ui/pet.js) ---
+
+// A virtual mouse: the pet scenes move the real pointer, so hovering, the eyes and dragging go through the same input
+// path as a person's mouse. One device for the whole run. A move to where the pointer already is would reset the
+// idle time without moving it, which the typing heuristic (services/idle.js) takes for a key press; it is skipped.
+let virtualMouse = null;
+
+function mouse() {
+    if (!virtualMouse) {
+        const seat = global.stage.context.get_backend().get_default_seat();
+        virtualMouse = seat.create_virtual_device(Clutter.InputDeviceType.POINTER_DEVICE);
+    }
+    const device = virtualMouse;
+    const now = () => GLib.get_monotonic_time();
+    return {
+        moveTo(x, y) {
+            const [px, py] = global.get_pointer();
+            if (Math.round(x) !== px || Math.round(y) !== py)
+                device.notify_absolute_motion(now(), x, y);
+        },
+        press: () => device.notify_button(now(), Clutter.BUTTON_PRIMARY, Clutter.ButtonState.PRESSED),
+        release: () => device.notify_button(now(), Clutter.BUTTON_PRIMARY, Clutter.ButtonState.RELEASED),
+    };
+}
+
+// A spot on the desktop, away from the pet.
+const AWAY = [60, 400];
+
+function expect(ok, message) {
+    if (!ok)
+        throw new Error(message);
+}
+
+const describePet = pet => `${JSON.stringify(pet.frame)} ${pet.behavior} ground=${pet.ground}`;
+
+// Waits (at most `ms`) until the pet stands or walks on the ground.
+async function untilOnGround(ctx, pet, ms = 4000) {
+    for (let waited = 0; waited <= ms; waited += 100) {
+        if ((pet.behavior === 'idle' || pet.behavior === 'walk') && pet.frame.y === pet.ground)
+            return;
+        await ctx.wait(100);
+    }
+    throw new Error(`the pet is not on the ground: ${describePet(pet)}`);
+}
+
+// The far side of the work area from where the pet stands, so a walk there is long.
+function farSide(pet) {
+    const area = pet.workArea;
+    const {x, width} = pet.frame;
+    return x + width / 2 > area.x + area.width / 2 ? area.x + 50 : area.x + area.width - width - 50;
+}
+
+// Runs body(pet, mouse) with the brain's mood pinned to `mood` (null: the brain's own). `still-while-typing` is off
+// meanwhile: a scene's clicks look like typing to the heuristic and would keep the pet still for 20 s (that rule is
+// covered by the unit tests). Afterwards the mood and the setting are back, the pet may walk, and the mouse is away.
+async function withPet(ctx, mood, body) {
+    const {app} = ctx;
+    const pet = app.pet;
+    expect(pet?.visible, 'the pet is not on screen');
+    const still = app.settings.get_boolean('still-while-typing');
+    app.settings.set_boolean('still-while-typing', false);
+    mouse().moveTo(...AWAY);
+    if (mood)
+        app.brain.pin({mood});
+    try {
+        await body(pet, mouse());
+    } finally {
+        mouse().moveTo(...AWAY);
+        pet.paused = false;
+        if (mood) {
+            app.brain.pin({mood: undefined});
+            app.brain.recompute();
+        }
+        app.settings.set_boolean('still-while-typing', still);
+    }
+}
+
+// Two shots 2 s apart while the pet walks along the bottom of the work area.
+registerScene('walk', ctx => withPet(ctx, Mood.normal, async pet => {
+    await untilOnGround(ctx, pet);
+    pet.walkTo(farSide(pet));
+    await ctx.wait(500);
+    const first = pet.frame;
+    await ctx.shot('walk-1');
+    await ctx.wait(2000);
+    const second = pet.frame;
+    await ctx.shot('walk-2');
+    console.log(`TODOPET walk x ${first.x} -> ${second.x}, y ${first.y} -> ${second.y}, ground ${pet.ground}, ` +
+        `work area ${JSON.stringify(pet.workArea)}`);
+    expect(Math.abs(second.x - first.x) >= 40, `the pet did not walk: x ${first.x} -> ${second.x}`);
+    expect(first.y === pet.ground && second.y === pet.ground, 'the pet is not on the ground while it walks');
+}));
+
+// The pointer on a walking pet: it stops and gets the petted look.
+registerScene('hover', ctx => withPet(ctx, Mood.normal, async (pet, pointer) => {
+    await untilOnGround(ctx, pet);
+    pet.walkTo(farSide(pet));
+    await ctx.wait(700);
+    expect(pet.motion.walking, `the pet should be walking before the hover: ${describePet(pet)}`);
+    const {x, y, width, height} = pet.frame;
+    pointer.moveTo(x + width / 2, y + height * 0.6);
+    await ctx.wait(800);
+    const before = pet.frame;
+    await ctx.wait(500);
+    const after = pet.frame;
+    console.log(`TODOPET hover hovered=${pet.hovered} walking=${pet.motion.walking} x ${before.x} -> ${after.x}`);
+    expect(pet.hovered, 'the pointer is on the pet but it is not hovered');
+    expect(!pet.motion.walking && before.x === after.x, 'the pet keeps walking under the pointer');
+    await ctx.shot('hover');
+}));
+
+// Picks the pet up, lifts it 300 px, lets go: it falls back onto the ground.
+registerScene('drag', ctx => withPet(ctx, Mood.normal, async (pet, pointer) => {
+    await untilOnGround(ctx, pet);
+    // Standing still, so it is where the pointer goes and lands where it was lifted.
+    pet.paused = true;
+    await ctx.wait(700);
+    const start = pet.frame;
+    const x = start.x + start.width / 2;
+    const y = start.y + start.height * 0.6;
+    pointer.moveTo(x, y);
+    await ctx.wait(300);
+    pointer.press();
+    for (let step = 1; step <= 10; step++) {
+        await ctx.wait(30);
+        pointer.moveTo(x, y - 30 * step);
+    }
+    await ctx.wait(300);
+    const air = pet.frame;
+    console.log(`TODOPET drag held=${pet.motion.held} ${describePet(pet)} (lifted from y ${start.y})`);
+    expect(pet.behavior === 'held' && pet.motion.held, `the pet is not held: ${describePet(pet)}`);
+    expect(air.x === start.x && air.y === start.y - 300, `the pet did not follow the pointer 300 px up: ${describePet(pet)}`);
+    await ctx.shot('drag-air');
+    pointer.release();
+    await ctx.wait(150);
+    console.log(`TODOPET drag released: ${describePet(pet)}`);
+    expect(pet.behavior === 'fall' && pet.frame.y > air.y, `the pet does not fall when let go: ${describePet(pet)}`);
+    await untilOnGround(ctx, pet, 3000);
+    pointer.moveTo(...AWAY);
+    await ctx.wait(300);
+    const landed = pet.frame;
+    console.log(`TODOPET drag landed ${describePet(pet)}`);
+    expect(landed.x === start.x && landed.y === start.y, `the pet did not land where it was lifted: ${describePet(pet)}`);
+    await ctx.shot('drag-landed');
+}));
+
+// A focus session: the headband, and the countdown chip on the pet's head.
+registerScene('focus-chip', ctx => withPet(ctx, null, async pet => {
+    const {brain} = ctx.app;
+    brain.startFocus(null);
+    try {
+        await ctx.wait(1500);
+        console.log(`TODOPET focus mood=${brain.mood} chip=${pet.chipText}`);
+        expect(brain.mood === Mood.focus, `the mood is ${brain.mood}, not focus`);
+        expect(/^🍅 2[45]:\d\d$/.test(pet.chipText ?? ''), `the chip says '${pet.chipText}'`);
+        await ctx.shot('focus-chip');
+    } finally {
+        brain.stopFocus();
+    }
+}));
+
+// After work: the work hours are moved so that they ended before now (they start next hour). The brain calls only
+// 23:00–06:00 night, which a scene cannot wait for, so the mood is pinned to sleeping, as the night would set it.
+registerScene('sleeping', async ctx => {
+    const {settings} = ctx.app;
+    const saved = [settings.get_int('work-start'), settings.get_int('work-end')];
+    const start = (new Date().getHours() + 1) % 24;
+    settings.set_int('work-start', start);
+    settings.set_int('work-end', start + 1);
+    try {
+        await withPet(ctx, Mood.sleeping, async pet => {
+            await ctx.wait(1000);
+            console.log(`TODOPET sleeping mood=${ctx.app.brain.mood} work ${start}-${start + 1} ${describePet(pet)}`);
+            expect(ctx.app.brain.mood === Mood.sleeping, `the mood is ${ctx.app.brain.mood}`);
+            expect(!pet.motion.walking, 'a sleeping pet does not walk');
+            await ctx.shot('sleeping');
+        });
+    } finally {
+        settings.set_int('work-start', saved[0]);
+        settings.set_int('work-end', saved[1]);
+    }
 });

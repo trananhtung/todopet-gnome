@@ -1,0 +1,16 @@
+/* The chip on the pet's head (PetWindow.swift: FocusChip, and the 🎧 deep-work capsule). */
+.todopet-pet-chip {
+    background-color: rgba(0, 0, 0, 0.7);
+    color: #ffffff;
+    border-radius: 999px;
+    padding: 2px 7px;
+    font-size: 11px;
+    font-weight: bold;
+    font-feature-settings: "tnum";
+}
+
+.todopet-pet-chip.todopet-pet-chip-flow {
+    background-color: rgba(0, 0, 0, 0.35);
+    padding: 1px 5px;
+    font-weight: normal;
+}

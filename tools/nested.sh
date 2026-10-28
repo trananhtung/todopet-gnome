@@ -12,18 +12,20 @@
 set -euo pipefail
 
 # Scenes played by default, in this order. A task that adds a scene appends its id here.
-SCENES=(smoke services)
+SCENES=(smoke services walk hover drag focus-chip sleeping)
 
 UUID=todopet@trananhtung.github.io
 MONITOR=1600x900
 TIMEOUT_SECONDS=180
 ERROR_GRACE_SECONDS=20
 # What counts as an error in the log: uncaught JS exceptions, anything logged with console.error or logError
-# (GNOME Shell turns those into "GNOME Shell-CRITICAL"), failed scenes, and any line that mentions todopet and
-# an error. gjs reports a promise that rejected with nobody waiting for it as a Gjs-WARNING whose own line says
-# neither "todopet" nor "JS ERROR", so that message is matched by name; Gjs-WARNING as a whole is noise here
-# (for example the NM.Object::client line on every run), as are warnings from mutter, GTK and D-Bus.
-ERROR_PATTERN='JS ERROR|GNOME Shell-CRITICAL|Unhandled promise rejection|TODOPET SCENE ERROR|todopet.*error|error.*todopet'
+# (GNOME Shell turns those into "GNOME Shell-CRITICAL"), any other CRITICAL from GLib, St, Clutter or Cogl (a
+# failed assertion, such as St reading the style of an actor that is not on the stage), failed scenes, and any
+# line that mentions todopet and an error. gjs reports a promise that rejected with nobody waiting for it as a
+# Gjs-WARNING whose own line says neither "todopet" nor "JS ERROR", so that message is matched by name;
+# Gjs-WARNING as a whole is noise here (for example the NM.Object::client line on every run), as are warnings
+# from mutter, GTK and D-Bus.
+ERROR_PATTERN='JS ERROR|CRITICAL \*\*|Unhandled promise rejection|TODOPET SCENE ERROR|todopet.*error|error.*todopet'
 
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
 NESTED="$ROOT/build/nested"
