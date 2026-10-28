@@ -242,9 +242,7 @@ class RuleMethods {
             (day.planned < target && ctx.hoursAfterPlanDeadline >= 0 && this._isDue('plan', 30, now)) ||
             (day.next !== null && now - this.lastBubbleAt > remindEvery * MINUTE && this._isDue('nudge', remindEvery, now)) ||
             this.stuckTasks.some(s => !this.fired.has(`stuck-${s.task.id}-${this.dayKey}`)) ||
-            (isHungry(this.life.state) && this._isDue('hungry', 60, now)) ||
-            // Not in Swift's list: the overdue reminder is held (and logged) like the others.
-            (day.overdue.length > 0 && this._isDue('overdue', 90, now)));
+            (isHungry(this.life.state) && this._isDue('hungry', 60, now)));
         if (this.flow) {
             if (somethingDue) {
                 this.diary.add('hold', L('Có lời nhắc đến hạn nhưng bạn đang vào guồng — để sau',

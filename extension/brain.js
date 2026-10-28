@@ -14,7 +14,9 @@
 //
 // Events (brain.on(name, cb)): 'changed' after any change the UI shows; 'bubble' with the new bubble, or null when
 // it was taken away; 'celebrate' with the celebration; 'antic' with the antic; 'antic-end'.
-// A bubble is {id, text, actions: [{title, primary, run}], seconds = 12, urgent, reminder}.
+// A bubble is {id, text, actions: [{title, primary, run}], seconds = 12, urgent, reminder}. The bubble view hides it
+// after `seconds` and calls dismissBubble(); if no view did, the brain drops it itself `seconds` + 2 s after showing it
+// (and emits 'bubble' with null).
 //
 // Sections, in Brain.swift order: token and demo, sync, mood, life settlement, talking, tick.
 // The reminder rules, flow and distraction tracking and mischief live in brain/rules.js and are installed as Brain
@@ -159,6 +161,10 @@ export class Brain extends Emitter {
         this.antic = null; // {id, kind, text, start}
         this.flow = false;
         this.locked = false;
+        // The rule that spoke last (null until one does; a held reminder does not change it). From brain/rules.js:
+        // meeting, due, morning, plan, distraction, stuck, hungry, antic (block, parade or grumble), overdue,
+        // timeblock, review, nudge, tip, and Swift's other messages: token (no Todoist token), welcome (back after
+        // being away), night, alldone, distractsum. Task 16 adds focusEnd.
         this.lastRule = null;
         this.closeDayCalls = 0;
 

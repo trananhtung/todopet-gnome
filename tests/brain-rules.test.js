@@ -44,10 +44,10 @@ async function brief(t) {
     const f = makeBrain({active: three(), env: {typingSince: at('2026-10-27T14:00')}, now: at('2026-10-27T14:11')});
     await f.start(); await f.refresh(); f.forceDue('nudge'); f.tick(at('2026-10-27T14:11:01'));
     t.check(f.lastRule !== 'nudge' && f.diary.today.some(e => e.kind === 'hold'), 'deep work holds the nudge');
-    const g = makeBrain({active: three(), overdue: 1, now: at('2026-10-27T14:00')});
+    const g = makeBrain({active: three(), overdue: 1, prefs: {remindEvery: 5}, now: at('2026-10-27T14:00')});
     await g.start(); await g.refresh(); g.tick(at('2026-10-27T14:00:01'));
     t.eq(g.lastRule, 'overdue', 'overdue tasks get a reminder');
-    g.lastRule = null; g.forceDue('overdue'); g.tick(at('2026-10-27T14:10:00'));
+    g.lastRule = null; g.forceDue('nudge'); g.tick(at('2026-10-27T14:10:00'));
     t.check(g.lastRule === null && g.diary.today.some(e => e.kind === 'hold'), 'bubble gap of 15 minutes holds the next reminder');
     const d = makeBrain({active: three(), now: at('2026-10-27T15:03'),
         env: {focus: {appName: 'Firefox', wmClass: 'firefox', title: 'Cats - YouTube — Mozilla Firefox', isBrowser: true, since: at('2026-10-27T15:00')}}});
