@@ -96,7 +96,7 @@ export function settingsPages() {
                         key: 'voice-on', title: L('Pet nói thành tiếng', 'Pet speaks out loud'),
                         subtitle: L('Dùng giọng đọc của hệ thống (spd-say)', 'Uses the system text-to-speech voice (spd-say)'),
                         needs: 'speech',
-                        unavailable: L('Cần speech-dispatcher: cài gói speech-dispatcher (lệnh spd-say) để bật', 'Needs speech-dispatcher: install the speech-dispatcher package (the spd-say command) to turn this on'),
+                        unavailable: L('Cần speech-dispatcher: cài gói speech-dispatcher (lệnh spd-say) để pet nói được', 'Needs speech-dispatcher: install the speech-dispatcher package (the spd-say command) for the pet to speak'),
                     }),
                     row('action', {
                         id: 'voiceTest', title: L('Nghe thử', 'Test voice'), button: L('Nói', 'Speak'), showWhen: 'voice-on',

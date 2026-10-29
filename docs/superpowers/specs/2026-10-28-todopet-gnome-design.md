@@ -43,7 +43,7 @@ describes what changes; anything it does not mention behaves exactly as in the S
 | Keychain | libsecret (`Secret` GI), GNOME Keyring. Items: Todoist token, Anthropic API key. |
 | Menu bar item (`😊 2/3`, `🍅 18:42`) + menu | `PanelMenu.Button` in the top bar with the same label and the same quick menu (add task, focus, hide 1 h, quiet 1 h, diary, settings) |
 | Global hotkey ⌃⌥T | `Main.wm.addKeybinding`. Default **Ctrl+Super+T** because Ubuntu uses Ctrl+Alt+T for the Terminal. Changeable in Settings. |
-| `AVSpeechSynthesizer` | `spd-say` (speech-dispatcher) with `-l vi` / `-l en`. The option is disabled with a hint when `spd-say` is missing. |
+| `AVSpeechSynthesizer` | `spd-say` (speech-dispatcher) with `-l vi` / `-l en`. When `spd-say` is missing the switch shows a hint and can only be turned off. |
 | `NSSound` | `global.display.get_sound_player()` with freedesktop theme sounds. Keeps the 3 sound modes (Off, Important only, Everything). |
 | Open at login | Removed. The extension starts with GNOME Shell. |
 | `NSWorkspace.didWake` | logind `PrepareForSleep(false)` signal, plus a fallback when the gap between two ticks exceeds 2 minutes |

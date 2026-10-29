@@ -8,7 +8,7 @@ export function speechArgs(text, lang) {
     return ['spd-say', '-l', lang, '--', text];
 }
 
-// False when speech-dispatcher is not installed; the voice option is then disabled with a hint.
+// False when speech-dispatcher is not installed; the voice switch then shows a hint and only turns off.
 export function hasSpeech() {
     return GLib.find_program_in_path('spd-say') !== null;
 }
