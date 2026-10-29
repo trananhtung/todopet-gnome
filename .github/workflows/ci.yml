@@ -14,12 +14,13 @@ jobs:
       DEBIAN_FRONTEND: noninteractive
     steps:
       # The container runs as root and starts almost empty: git for checkout, make,
-      # tzdata for TZ=Asia/Ho_Chi_Minh in the tests, and fonts for the Pango drawing.
+      # tzdata for TZ=Asia/Ho_Chi_Minh in the tests, and the desktop's own fonts
+      # (Noto Sans is what "Sans" resolves to on Ubuntu 26.04) so text metrics match.
       - name: Install system packages
         run: |
           apt-get update
           apt-get install -y --no-install-recommends git ca-certificates make tzdata \
-            fonts-dejavu-core fonts-noto-color-emoji \
+            fonts-noto-core fonts-noto-color-emoji \
             gjs gir1.2-soup-3.0 gir1.2-secret-1 gir1.2-pango-1.0 gir1.2-gdkpixbuf-2.0 libglib2.0-bin
 
       - uses: actions/checkout@v6
