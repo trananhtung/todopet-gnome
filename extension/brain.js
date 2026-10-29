@@ -1204,8 +1204,9 @@ export class Brain extends Emitter {
             this.recompute(now);
         }
         // A focus session or break whose time is up (brain/actions.js). Swift checks in its 15-second tick; this
-        // checks every second, so the bubble comes when the board's countdown reaches zero.
-        if (this.focusSession && now >= this.focusSession.end)
+        // checks every second, so the bubble comes when the board's countdown reaches zero. While the screen is locked
+        // the pet and its bubbles are off the screen, so the question waits for the first tick after the unlock.
+        if (this.focusSession && now >= this.focusSession.end && !this.locked)
             this._finishFocus(now);
         if (this._lastSlowTick === null || now - this._lastSlowTick >= SLOW_TICK_MS || now < this._lastSlowTick) {
             this._lastSlowTick = now;

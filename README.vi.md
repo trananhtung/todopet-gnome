@@ -187,7 +187,7 @@ Theo thứ tự ưu tiên, mỗi lúc chỉ một bong bóng:
 
 Mọi mốc thời gian đều chỉnh được trong **Cài đặt**: số việc mỗi ngày, giờ làm, ngày làm việc, hạn lên kế hoạch, khoảng nhắc, độ dài phiên tập trung và giờ nghỉ, app và trang web gây xao nhãng, tuỳ chọn Lịch, sau bao nhiêu ngày thì tính là bị dời mãi, bộ lọc Todoist riêng cho "việc của tôi" (ví dụ `(today | overdue) & #Work`), kích thước pet, âm thanh, trò quậy, giọng nói, và bảo vệ tập trung.
 
-Khi màn hình bị khoá, pet và các bong bóng sẽ ẩn đi, nhưng tiện ích vẫn chạy: hẹn giờ tập trung vẫn đếm tiếp và kết quả chốt ngày không bị mất. Phiên tập trung đang chạy cũng được lưu xuống đĩa, nên khởi động lại GNOME Shell không làm mất nó.
+Khi màn hình bị khoá, pet và các bong bóng sẽ ẩn đi, nhưng tiện ích vẫn chạy: hẹn giờ tập trung vẫn đếm tiếp và kết quả chốt ngày không bị mất. Phiên tập trung hay giờ nghỉ hết giờ lúc màn hình đang khoá sẽ hỏi bạn khi bạn mở khoá. Phiên tập trung đang chạy cũng được lưu xuống đĩa, nên khởi động lại GNOME Shell không làm mất nó.
 
 ## Thiết kế để không làm bạn mất tập trung
 

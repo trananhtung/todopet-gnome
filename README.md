@@ -187,7 +187,7 @@ In priority order, at most one bubble at a time:
 
 All timings are in **Settings**: daily target, work hours, work days, planning deadline, reminder interval, focus and break length, distracting apps and websites, calendar options, when a task counts as postponed, a custom Todoist filter for "my day" (for example `(today | overdue) & #Work`), pet size, sounds, mischief, spoken lines, and focus protection.
 
-When the screen is locked the pet and its bubbles hide, but the extension keeps running: a focus timer carries on and the day's settlement isn't lost. A running focus session is also saved to disk, so restarting GNOME Shell doesn't lose it.
+When the screen is locked the pet and its bubbles hide, but the extension keeps running: a focus timer carries on and the day's settlement isn't lost. A focus session or break that ends while the screen is locked asks how it went once you unlock. A running focus session is also saved to disk, so restarting GNOME Shell doesn't lose it.
 
 ## Designed not to break your focus
 

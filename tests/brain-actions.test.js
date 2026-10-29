@@ -393,6 +393,28 @@ async function focus(t) {
     await gone.refresh();
     gone.tick(at('2026-10-27T11:25:00'));
     t.eq(titles(gone), ['+25\' more', '☕ Break 5\''], 'no Done button when the task is no longer open');
+
+    // While the screen is locked the pet and its bubbles are off the screen: a session or a break that ends then asks
+    // once the screen is unlocked, instead of putting its question up where nobody sees it.
+    const away = makeBrain({active: [task('a', TODAY)]});
+    await away.start(); await away.refresh();
+    away.startFocus(away.day.today[0], 25);
+    away.tick(at('2026-10-27T11:20:00'));
+    away.setLocked(true);
+    away.tick(at('2026-10-27T11:25:00'));
+    away.tick(at('2026-10-27T11:50:00'));
+    t.check(away.focusSession !== null && away.lastRule !== 'focusEnd', 'a session that ends while locked waits for the unlock');
+    away.setLocked(false);
+    away.tick(at('2026-10-27T11:50:01'));
+    t.eq([away.focusSession, away.lastRule, titles(away)], [null, 'focusEnd', ['✓ Done', '+25\' more', '☕ Break 5\'']],
+        'then the first tick asks if the task is done');
+    action(away, '☕ Break 5\'').run();
+    away.setLocked(true);
+    away.tick(at('2026-10-27T11:56:00'));
+    t.check(away.focusSession?.isBreak === true, 'a break that ends while locked waits too');
+    away.setLocked(false);
+    away.tick(at('2026-10-27T11:56:01'));
+    t.eq([away.focusSession, away.lastRule, titles(away)], [null, 'breakEnd', [FOCUS, 'Later']], 'and calls you back after the unlock');
 }
 
 async function focusRestore(t) {

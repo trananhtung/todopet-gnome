@@ -80,8 +80,9 @@ which only makes the pet quieter.
 
 GNOME disables extensions on the lock screen unless they ask to stay. The extension declares
 `"session-modes": ["user", "unlock-dialog"]` so the focus timer, combos and day settlement keep running.
-While locked it hides every actor, shows nothing, and counts as "away". The focus session's end time is also saved
-to disk, so a GNOME Shell restart doesn't lose it.
+While locked it hides every actor, shows nothing, and counts as "away". A focus session or break that ends while
+locked asks its question after the unlock. The focus session's end time is also saved to disk, so a GNOME Shell
+restart doesn't lose it.
 
 ## Architecture
 
