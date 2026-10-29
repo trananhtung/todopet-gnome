@@ -1,7 +1,7 @@
 {
   "uuid": "todopet@trananhtung.github.io",
   "name": "TodoPet",
-  "description": "A desktop pet that reads your Todoist tasks. It gets happy when you work and grumpy when you don't.",
+  "description": "A desktop pet that reads your Todoist tasks. It gets happy when you work and grumpy when you don't.\n\nIt stays enabled on the lock screen (session mode unlock-dialog) so that a running focus timer and the day's settlement keep going while you are away. It shows nothing there: the pet, its bubbles, the task board, the top bar item and the shortcut are off until you unlock.\n\nThe diary's Copy button puts that day's diary on the clipboard. Nothing is read from the clipboard.\n\nNetwork: api.todoist.com for your tasks, with the token you give it, and api.anthropic.com only when you press Ask Claude, with your own API key. No analytics.",
   "shell-version": ["50"],
   "session-modes": ["user", "unlock-dialog"],
   "settings-schema": "org.gnome.shell.extensions.todopet",

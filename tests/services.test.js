@@ -1,5 +1,6 @@
 // Tests for the network clients: services/todoist.js, services/demo.js and services/claude.js run against
 // FakeTransport (no network at all), and services/http.js runs against a throwaway server on 127.0.0.1.
+import Gio from 'gi://Gio';
 import Soup from 'gi://Soup?version=3.0';
 
 import {getLang, setLang} from '../extension/core/l10n.js';
@@ -545,7 +546,26 @@ async function soupTransport(t) {
     new SoupTransport().abort();
 }
 
+// extensions.gnome.org's reviewers read metadata.json's description: it says why the extension stays on in the lock
+// screen's session mode, that it writes to the clipboard, and every host it talks to. The hosts are the ones the
+// clients really send their requests to.
+async function metadataDescription(t) {
+    const root = Gio.File.new_for_uri(import.meta.url).get_parent().get_parent();
+    const [, bytes] = root.resolve_relative_path('extension/metadata.json').load_contents(null);
+    const metadata = JSON.parse(new TextDecoder().decode(bytes));
+    const {description} = metadata;
+    t.check(!metadata['session-modes'].includes('unlock-dialog') || /lock screen/i.test(description),
+        'the description says why the extension runs on the lock screen');
+    t.check(/clipboard/i.test(description), 'the description says the diary is copied to the clipboard');
+    const {transport, client} = todoist([ok('[]')]);
+    await caught(client.activeTasks('today'));
+    const urls = [transport.calls[0]?.url, buildBreakdownRequest({key: 'k', model: 'm', title: 'T', notes: null}).url];
+    for (const host of urls.map(url => /^https:\/\/([^/]+)\//.exec(url ?? '')?.[1] ?? `(no host in ${url})`))
+        t.check(description.includes(host), `the description names ${host}`);
+}
+
 export default async function (t) {
+    await metadataDescription(t);
     await todoistUrls(t);
     await todoistReading(t);
     await todoistWriting(t);
