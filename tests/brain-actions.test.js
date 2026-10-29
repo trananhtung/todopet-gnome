@@ -69,13 +69,14 @@ async function brief(t) {
 async function keyring(t) {
     const logs = [];
     const k = makeBrain({env: {secretsFail: true}});
-    k._log = message => logs.push(message);
+    k._log = (message, options) => logs.push({message, warning: options?.warning === true});
     await k.start();
     k.tick(at('2026-10-27T11:00:01')); k.tick(at('2026-10-27T11:00:03')); await k.settle();
     k.tick(at('2026-10-27T11:00:20')); await k.settle();
     t.check(!k.hasToken && k.bubble === null && k.lastRule === null &&
         !k.diary.today.some(e => e.tag === 'askToken'), 'a keyring that cannot be read is not "no token": no hello');
     t.eq(logs.length, 1, 'the keyring failure is logged once, not on every retry');
+    t.check(logs[0]?.warning, 'a keyring that cannot be read is logged as a warning (GNOME Shell shows an error as CRITICAL)');
     k.env.secretsFail = false;
     k.tick(at('2026-10-27T11:00:40')); await k.settle();
     t.check(k.hasToken && k.fakeTodo.token === 'test-token' && k.lastSync !== null,
@@ -117,6 +118,18 @@ async function keyring(t) {
     s.env.secretsFail = [SECRET_ANTHROPIC];
     await s.reloadSecrets();
     t.check(s.hasClaudeKey, 'a Claude key that cannot be read is not taken as removed');
+
+    // Saving into a keyring that is not there: the token still connects, and both failures are warnings.
+    const w = makeBrain({token: null, env: {secretsFail: true}});
+    const saves = [];
+    w._log = (message, options) => saves.push({message, warning: options?.warning === true});
+    await w.start(); await w.settle();
+    saves.length = 0;
+    await w.setToken('typed-token');
+    await w.setClaudeKey('sk-typed');
+    t.check(w.hasToken, 'a token the keyring cannot save still connects');
+    t.eq(saves.map(x => [x.message.includes('keyring'), x.warning]), [[true, true], [true, true]],
+        'a token or key the keyring cannot save is logged as a warning');
 }
 
 // Delete, schedule, unplan, reschedule, pull overdue in, move today to tomorrow.

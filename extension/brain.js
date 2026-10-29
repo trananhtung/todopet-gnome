@@ -347,7 +347,7 @@ export class Brain extends Emitter {
         try {
             await this.env.storeSecret(SECRET_TODOIST, token);
         } catch (e) {
-            this._log(`TodoPet: could not save the Todoist token in the keyring: ${e?.message ?? e}`);
+            this._log(`TodoPet: could not save the Todoist token in the keyring: ${e?.message ?? e}`, {warning: true});
         }
         this._useToken(token, client);
         this._resetDay(this._now());
@@ -400,7 +400,7 @@ export class Brain extends Emitter {
                 else
                     await this.env.storeSecret(SECRET_ANTHROPIC, k);
             } catch (e) {
-                this._log(`TodoPet: could not change the Claude key in the keyring: ${e?.message ?? e}`);
+                this._log(`TodoPet: could not change the Claude key in the keyring: ${e?.message ?? e}`, {warning: true});
             }
             try {
                 this.hasClaudeKey = Boolean(await this.env.lookupSecret(SECRET_ANTHROPIC));
@@ -485,7 +485,8 @@ export class Brain extends Emitter {
         if (this._keyringLogged)
             return;
         this._keyringLogged = true;
-        this._log(`TodoPet: could not read ${what} from the keyring, trying again every 15 s: ${e?.message ?? e}`);
+        this._log(`TodoPet: could not read ${what} from the keyring, trying again every 15 s: ${e?.message ?? e}`,
+            {warning: true});
     }
 
     // The slow tick's new try at a keyring that could not be read. Once a token that could not be read turns out to
@@ -1323,9 +1324,13 @@ export class Brain extends Emitter {
         this._changed();
     }
 
-    // Unexpected problems go to the journal. Tests replace this to see them.
-    _log(message) {
-        console.error(message);
+    // Unexpected problems go to the journal. A `warning` is trouble around the extension rather than in it (no keyring):
+    // GNOME Shell shows console.error as CRITICAL. Tests replace this to see them.
+    _log(message, {warning = false} = {}) {
+        if (warning)
+            console.warn(message);
+        else
+            console.error(message);
     }
 }
 
