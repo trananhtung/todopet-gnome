@@ -1808,7 +1808,7 @@ function setLocked(app, locked) {
 
 // While the screen is locked nothing of ours is on screen: not the pet, its stunts and sign, its bubble, the board
 // or the top bar item, and the board will not open. Everything comes back when it unlocks. A board that was open while
-// the pet was hidden (it stays, in the corner) closes too.
+// the pet was hidden (it stays, in the corner) closes too. A focus session that ends on the lock screen asks after it.
 registerScene('locked', ctx => withPet(ctx, Mood.angry, async pet => {
     const {app} = ctx;
     const {brain, prefs, board, antics, indicator} = app;
@@ -1865,6 +1865,20 @@ registerScene('locked', ctx => withPet(ctx, Mood.angry, async pet => {
     expect(board.isOpen, 'the board does not open after unlocking');
     board.close();
     brain.endAntic();
+    brain.dismissBubble();
+
+    // A focus session that ends while the screen is locked asks once it is unlocked (its end is moved into the past
+    // instead of waiting out a minute).
+    brain.startFocus(null, 1);
+    setLocked(app, true);
+    brain.focusSession.end = new Date(Date.now() - 1000);
+    await ctx.wait(1500);
+    expect(brain.focusSession !== null && !app.bubble.visible, 'the focus session ended on the lock screen');
+    setLocked(app, false);
+    await ctx.wait(1500);
+    console.log(`TODOPET locked focus end: session=${brain.focusSession !== null} rule=${brain.lastRule} bubble=${app.bubble.visible}`);
+    expect(brain.focusSession === null && brain.lastRule === 'focusEnd' && app.bubble.visible && brain.bubble?.actions.length > 0,
+        'the end of the focus session did not ask after the unlock');
     brain.dismissBubble();
 }));
 
