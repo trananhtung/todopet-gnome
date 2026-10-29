@@ -408,6 +408,10 @@ async function focus(t) {
     away.tick(at('2026-10-27T11:50:01'));
     t.eq([away.focusSession, away.lastRule, titles(away)], [null, 'focusEnd', ['✓ Done', '+25\' more', '☕ Break 5\'']],
         'then the first tick asks if the task is done');
+    away.tick(at('2026-10-27T11:50:16'));
+    t.check(away.lastRule === 'focusEnd' && titles(away)?.[0] === '✓ Done' &&
+        lastOf(away, 'system')?.text === 'You came back after 30 minutes',
+        'the next round notes the return but does not put "welcome back" over that question');
     action(away, '☕ Break 5\'').run();
     away.setLocked(true);
     away.tick(at('2026-10-27T11:56:00'));

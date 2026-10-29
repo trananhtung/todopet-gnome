@@ -145,8 +145,10 @@ class RuleMethods {
             const minutes = Math.trunc((now - this.awaySince) / MINUTE);
             this.awaySince = null;
             this.diary.add('system', L(`Bạn quay lại sau ${minutes} phút`, `You came back after ${minutes} minutes`), {now});
+            // Not over a question already up: a focus session that ended while the screen was locked asks right
+            // after the unlock, and its buttons say more than "welcome back" would.
             const next = this.day.next;
-            if (minutes > 15 && ctx.inWork && next) {
+            if (minutes > 15 && ctx.inWork && next && !(this.bubble?.actions.length > 0)) {
                 this._remind('welcome', {
                     text: Lines.welcomeBack(next), actions: [this._focusAction(next), this._laterAction()], seconds: 30,
                 }, {why: L(`bạn vừa quay lại sau ${minutes} phút`, `you just came back after ${minutes} minutes`)});
