@@ -35,7 +35,7 @@ describes what changes; anything it does not mention behaves exactly as in the S
 |---|---|
 | Floating `NSWindow` above the Dock | `St.DrawingArea` added as **top chrome** (`Main.layoutManager.addTopChrome`, `trackFullscreen: true`). Only the pet's own actors take input; everything else clicks through. The pet walks along the bottom edge of the primary monitor's work area (`getWorkAreaForMonitor`), so it stands on a bottom dock when the dock reserves space. |
 | Cursor position (look at cursor, march toward it) | `global.get_pointer()` |
-| Frontmost app (`NSWorkspace`) | `global.display.focus_window` + `Shell.WindowTracker` → app name, `wm_class`, window title. Changes come from `notify::focus-window`. |
+| Frontmost app (`NSWorkspace`) | `global.display.focus_window` + `Shell.WindowTracker` → app name, `wm_class`, and the window title only when the window is a browser (no other window's title is read). Changes come from `notify::focus-window`, and from `notify::title` on a focused browser window. |
 | Active tab URL via AppleScript | **Window-title matching** (see below). URLs are no longer available. |
 | `secondsSinceLastEventType(.keyDown)` | **Typing heuristic** (see below) |
 | Idle time | `global.backend.get_core_idle_monitor().get_idletime()` (in-process `Meta.IdleMonitor`, no D-Bus round trip) |
