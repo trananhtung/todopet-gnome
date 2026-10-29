@@ -255,8 +255,9 @@ class SettingsWindow {
     _switchRow(r) {
         const row = new Adw.SwitchRow({title: esc(r.title), subtitle: esc(r.subtitle ?? '')});
         this._bind(r.key, row, 'active');
+        // Without spd-say the switch only turns off: a voice left on (set before, or by hand) must not be stuck on.
         if (r.needs === 'speech' && !hasSpeech()) {
-            row.sensitive = false;
+            this._bind(r.key, row, 'sensitive', BIND.GET);
             row.subtitle = esc(r.unavailable);
         }
         return row;

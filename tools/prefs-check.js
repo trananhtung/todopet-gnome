@@ -271,7 +271,7 @@ async function check(t) {
         t.eq(test.visible, false, 'the Test voice row is hidden while the voice is off');
         settings.set_boolean('voice-on', true);
         t.eq(test.visible, hasSpeech(), `the Test voice row ${hasSpeech() ? 'shows' : 'stays hidden (no spd-say)'} once it is on`);
-        t.eq(row(ui, 'General', 'Pet speaks out loud').sensitive, hasSpeech(), 'the voice switch is disabled without spd-say');
+        t.eq(row(ui, 'General', 'Pet speaks out loud').sensitive, true, 'a voice that is on can be turned off, with or without spd-say');
         let ecal = true;
         try {
             await import('gi://ECal?version=2.0');
@@ -283,6 +283,30 @@ async function check(t) {
         t.eq([join.title, join.subtitle], ecal ? ['Join links: on', ''] : ['Join links: off', 'install gir1.2-ecal-2.0 for Join links'],
             `ECal is ${ecal ? 'installed: on' : 'missing: the package to install'}`);
         window.close();
+    }
+
+    // --- Without speech-dispatcher (spd-say taken out of PATH): the voice switch only turns off ---
+    {
+        const path = GLib.getenv('PATH');
+        const empty = GLib.dir_make_tmp('todopet-prefs-check-path-XXXXXX');
+        GLib.setenv('PATH', empty, true);
+        try {
+            t.eq(hasSpeech(), false, 'with an empty PATH there is no spd-say');
+            const {window, ui} = await open({'voice-on': new GLib.Variant('b', true)});
+            const voice = row(ui, 'General', 'Pet speaks out loud');
+            t.check(voice.active && voice.sensitive, 'without spd-say, a voice left on can still be turned off');
+            t.check(voice.subtitle.startsWith('Needs speech-dispatcher'), 'and the subtitle says what to install');
+            voice.active = false;
+            t.eq([settings.get_boolean('voice-on'), voice.sensitive], [false, false], 'once off, it cannot be turned on again');
+            t.eq(row(ui, 'General', 'Test voice').visible, false, 'there is no Test voice row without spd-say');
+            window.close();
+            const off = await open();
+            t.eq(row(off.ui, 'General', 'Pet speaks out loud').sensitive, false, 'with the voice off the switch starts disabled');
+            off.window.close();
+        } finally {
+            GLib.setenv('PATH', path ?? '', true);
+            GLib.rmdir(empty);
+        }
     }
 
     // --- The board shortcut ---
