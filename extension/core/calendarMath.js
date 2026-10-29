@@ -29,6 +29,18 @@ export function isWebURL(text) {
     return typeof text === 'string' && /^https?:\/\//i.test(text) && hostOf(text) !== null;
 }
 
+// What a log line may say about a link: its scheme and host ("https://zoom.us/…"). The rest stays out of the journal:
+// a Join link can carry the meeting's password, a file: link a path in your home folder.
+export function linkForLog(text) {
+    if (typeof text !== 'string')
+        return '(no link)';
+    const scheme = /^([a-z][a-z0-9+.-]*):/i.exec(text)?.[1].toLowerCase();
+    if (!scheme)
+        return '(not a link)';
+    const host = hostOf(text);
+    return host === null ? `${scheme}:…` : `${scheme}://${host}/…`;
+}
+
 // Finds a video-call link in the event URL, then in the given texts (location, notes). Like the Swift app,
 // an event URL that is not a meeting link is still returned when the texts hold no meeting link, but only a web
 // (http or https) one: any other URL is no Join link.

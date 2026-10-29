@@ -21,7 +21,7 @@ import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
 import {clearArtCaches} from '../art/petArt.js';
 import {Brain} from '../brain.js';
-import {isWebURL} from '../core/calendarMath.js';
+import {isWebURL, linkForLog} from '../core/calendarMath.js';
 import {setLang} from '../core/l10n.js';
 import {Prefs} from '../core/prefs.js';
 import {CalendarSource} from '../services/calendar.js';
@@ -77,14 +77,16 @@ function keyringSecrets() {
     };
 }
 
-// Opens `url` in the default app (a meeting's join link), without waiting.
+// Opens `url` in the default app (a meeting's join link), without waiting. A failure is logged without the whole link
+// (a Join link can carry the meeting's password), also where Gio's message repeats it.
 function launchURL(url) {
     const context = global.create_app_launch_context(0, -1);
     Gio.AppInfo.launch_default_for_uri_async(url, context, null, (_source, result) => {
         try {
             Gio.AppInfo.launch_default_for_uri_finish(result);
         } catch (e) {
-            console.warn(`TodoPet: could not open ${url}: ${e.message}`);
+            const link = linkForLog(url);
+            console.warn(`TodoPet: could not open ${link}: ${String(e?.message ?? e).replaceAll(url, link)}`);
         }
     });
 }

@@ -1,8 +1,8 @@
 import {atHour, dayKey, parseDate} from '../extension/core/dates.js';
 import {Task} from '../extension/core/models.js';
 import {
-    busy, currentEvent, eventFromComp, eventsFromServer, freeMinutes, freeSlots, hoursText, isWebURL, joinURL, nextEvent,
-    suggest, targetFor,
+    busy, currentEvent, eventFromComp, eventsFromServer, freeMinutes, freeSlots, hoursText, isWebURL, joinURL, linkForLog,
+    nextEvent, suggest, targetFor,
 } from '../extension/core/calendarMath.js';
 import {StuckTracker, stuckDays} from '../extension/core/stuck.js';
 import {isBrowser, matchTitle, stripBrowserName, titleKeywords} from '../extension/core/sites.js';
@@ -194,6 +194,11 @@ export default async function (t) {
     t.eq([isWebURL('https://zoom.us/j/1'), isWebURL('http://x.example'), isWebURL('https://'), isWebURL('javascript:alert(1)'),
         isWebURL('file:///tmp'), isWebURL('smb://host/share'), isWebURL(' https://zoom.us'), isWebURL(null)],
     [true, true, false, false, false, false, false, false], 'isWebURL: http and https with a host, nothing else');
+    t.eq([linkForLog('https://zoom.us/j/123?pwd=hunter2'), linkForLog('HTTPS://me:pw@Meet.Google.com:443/abc-defg-hij'),
+        linkForLog('file:///home/me/.local/share/todopet/log'), linkForLog('javascript:alert(1)'), linkForLog('no link'),
+        linkForLog(null)],
+    ['https://zoom.us/…', 'https://meet.google.com/…', 'file:…', 'javascript:…', '(not a link)', '(no link)'],
+    'linkForLog keeps the scheme and the host of a link, never its user, path or query (a meeting password)');
 
     // --- Events from the calendar server ---
     const ev = eventsFromServer([['b', 'Sync', 1792908000, 1792909800, {}], ['a', 'Standup', 1792900000, 1792901800, {}],
