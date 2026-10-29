@@ -235,74 +235,90 @@ export class App {
         this._startDevScenes();
     }
 
-    // Undoes everything start() did. Safe to call twice, and before start() has finished.
+    // Undoes everything start() did. Safe to call twice, and before start() has finished. Every step runs even when
+    // one before it throws (logged once): a destroy() that fails must not leave the tick, the shortcut or the actors
+    // of a dead App behind.
     stop() {
         this._stopped = true;
         this._markStarted();
-        this._scenesCancellable?.cancel();
+        const step = (what, fn) => this._guard(`taking down ${what}`, fn);
+        step('the dev scenes', () => this._scenesCancellable?.cancel());
         this._scenesCancellable = null;
 
         if (this._tickId !== 0)
-            GLib.source_remove(this._tickId);
+            step('the tick', () => GLib.source_remove(this._tickId));
         this._tickId = 0;
         if (this._restartId !== 0)
-            GLib.source_remove(this._restartId);
+            step('the restart', () => GLib.source_remove(this._restartId));
         this._restartId = 0;
         if (this._hotkeyAdded)
-            Main.wm.removeKeybinding('board-hotkey');
+            step('the board shortcut', () => Main.wm.removeKeybinding('board-hotkey'));
         this._hotkeyAdded = false;
-        this.indicator?.destroy();
+        step('the top bar item', () => this.indicator?.destroy());
         this.indicator = null;
-        this.petMenu?.destroy();
+        step('the pet menu', () => this.petMenu?.destroy());
         this.petMenu = null;
 
-        for (const id of this._brainIds)
-            this.brain?.off(id);
+        step('the brain handlers', () => {
+            for (const id of this._brainIds)
+                this.brain?.off(id);
+        });
         this._brainIds = [];
         if (this.brain) {
             this.brain.openBoard = null;
             this.brain.openBreakdown = null;
             this.brain.openSettings = null;
         }
-        this.antics?.destroy();
+        step('the antics', () => this.antics?.destroy());
         this.antics = null;
-        this.board?.destroy();
+        step('the board', () => this.board?.destroy());
         this.board = null;
-        this.bubble?.destroy();
+        step('the bubble', () => this.bubble?.destroy());
         this.bubble = null;
-        this.brain?.stop();
+        step('the brain', () => this.brain?.stop());
         this.brain = null;
 
-        for (const id of this._petIds)
-            this.pet?.off(id);
+        step('the pet handlers', () => {
+            for (const id of this._petIds)
+                this.pet?.off(id);
+        });
         this._petIds = [];
-        this.pet?.destroy();
+        step('the pet', () => this.pet?.destroy());
         this.pet = null;
         // Modules outlive disable(): what they cache (Pango layouts, Cairo paths) goes with the pet.
-        clearArtCaches();
-        clearBadgeCache();
+        step('the art caches', () => {
+            clearArtCaches();
+            clearBadgeCache();
+        });
 
         // disable() cannot wait: the saves still waiting are started now and finish on their own.
-        if (this.store) {
-            const store = this.store;
-            store.flush().catch(e => console.error(`TodoPet: could not save the pet's state: ${e?.message ?? e}`));
-            store.destroy();
+        const store = this.store;
+        if (store) {
+            step('the store', () => {
+                store.flush().catch(e => console.error(`TodoPet: could not save the pet's state: ${e?.message ?? e}`));
+                store.destroy();
+            });
         }
         this.store = null;
         this.files = null;
 
-        for (const id of this._sessionIds)
-            this.session?.off(id);
+        step('the session handlers', () => {
+            for (const id of this._sessionIds)
+                this.session?.off(id);
+        });
         this._sessionIds = [];
-        for (const service of [this.calendar, this.session, this.focus, this.idle])
-            service?.stop();
+        for (const [what, service] of [['the calendar', this.calendar], ['the session watch', this.session],
+            ['the focus watch', this.focus], ['the idle watch', this.idle]])
+            step(what, () => service?.stop());
         this.calendar = null;
         this.session = null;
         this.focus = null;
         this.idle = null;
 
-        for (const id of this._prefIds)
-            this.prefs?.disconnect(id);
+        step('the settings handlers', () => {
+            for (const id of this._prefIds)
+                this.prefs?.disconnect(id);
+        });
         this._prefIds = [];
 
         this.prefs = null;
@@ -585,8 +601,14 @@ export class App {
             if (this._loggedFailures.has(what))
                 return;
             this._loggedFailures.add(what);
-            console.error(`TodoPet: ${what} failed: ${e?.stack ?? e}`);
+            this._logError(`TodoPet: ${what} failed: ${e?.stack ?? e}`);
         }
+    }
+
+    // The journal (GNOME Shell shows console.error as CRITICAL). The stop-steps dev scene replaces it: the failures it
+    // plants must not count as errors in the nested shell's log.
+    _logError(message) {
+        console.error(message);
     }
 
     // Plays a command written to `dev-trigger` (ui/devTrigger.js) and sets the key back to '' so the next write is a

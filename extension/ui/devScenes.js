@@ -2139,6 +2139,43 @@ registerScene('reenable', async ctx => {
     }
 });
 
+// disable() takes everything down even when a step of it throws: here the top bar item's and the board's destroy()
+// do their work and then throw. stop() logs both failures (through App._logError, replaced here so that the shell's
+// log stays clean) and still removes the tick, the pet, its bubble, the brain, the store and the settings handlers.
+// The extension is turned on again for the scenes after this one.
+registerScene('stop-steps', async ctx => {
+    const old = ctx.app;
+    const {uuid} = old.extension;
+    const logged = [];
+    const failAfter = object => {
+        const real = object.destroy;
+        object.destroy = function () {
+            real.call(this);
+            throw new Error('TODOPET planted failure');
+        };
+    };
+    failAfter(old.indicator);
+    failAfter(old.board);
+    old._logError = message => logged.push(message);
+    ctx.stopApp();
+    await ctx.wait(300);
+    const left = stageActors(isOurs).map(a => a.name);
+    console.log(`TODOPET stop-steps: logged=${logged.length} tick=${old._tickId} pet=${old.pet} brain=${old.brain} ` +
+        `store=${old.store} prefs=${old.prefs} handlers=${old._prefIds.length} left=[${left}] topBar=${Boolean(Main.panel.statusArea[uuid])}`);
+    const failed = logged.map(m => /^TodoPet: taking down (.+?) failed:/.exec(m)?.[1] ?? m);
+    expect(failed.join() === 'the top bar item,the board', `stop() logged these failures: ${failed.join(' | ')}`);
+    expect(old._tickId === 0 && old.pet === null && old.bubble === null && old.brain === null && old.store === null &&
+        old.prefs === null && old._prefIds.length === 0, 'stop() did not finish after a step failed');
+    expect(left.length === 0, `these are left on the stage: ${left}`);
+    expect(!Main.panel.statusArea[uuid], 'the top bar item is still there');
+
+    await ctx.startApp();
+    await ctx.wait(1500);
+    const {app} = ctx;
+    expect(app !== old && app.pet?.visible && Main.panel.statusArea[uuid] === app.indicator, 'the extension did not come back');
+    app.brain.dismissBubble();
+});
+
 // --- The settings window (prefs.js) ---
 
 // The settings window is another process (org.gnome.Shell.Extensions); its window is the extension's name.
