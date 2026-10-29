@@ -205,7 +205,7 @@ export class Brain extends Emitter {
         // The demo keeps its pet, log and diary in memory (Swift: PetLife(persist: false, initial: .demo)).
         this._lifeGate = this.demo || !store ? null : new GatedStore(store);
         this._trackerGate = this.demo || !store ? null : new GatedStore(store);
-        this.life = this.demo ? new PetLife({initial: DEMO_LIFE}) : new PetLife({store: this._lifeGate});
+        this.life = this.demo ? new PetLife({initial: DEMO_LIFE}) : new PetLife({store: this._lifeGate, now: () => this._now()});
         this.tracker = new StuckTracker({store: this._trackerGate});
         this.diary = new PetLog({now: start});
         this.diary.enabled = prefs.keepLog;
@@ -294,11 +294,13 @@ export class Brain extends Emitter {
         this._ready = true;
     }
 
-    // Disconnects from prefs and the calendar and drops the results of requests still in flight.
+    // Disconnects from prefs and the calendar, hands the life's lazy changes to the store (App flushes it next) and
+    // drops the results of requests still in flight.
     stop() {
         this._stopped = true;
         this._started = false;
         this._ready = false;
+        this.life.flush();
         if (this._prefsId !== null)
             this.prefs.disconnect(this._prefsId);
         this._prefsId = null;
@@ -1224,7 +1226,8 @@ export class Brain extends Emitter {
         // Hunger grows during work hours (not during meetings or while you're away).
         const ctx = this._context(now);
         const working = this.hasToken && ctx.inWork && this._currentMeeting(now) === null && !this._isAway(now);
-        this.life.mutate(s => LifeRules.decay(s, now, working));
+        // Lazy: hunger changes on every round, and life.json need not be written that often.
+        this.life.mutate(s => LifeRules.decay(s, now, working), {lazy: true});
         // Time on distracting sites, the end of a block, the distraction log and deep work (brain/rules.js).
         this._watchWork(now);
         this.recompute(now);

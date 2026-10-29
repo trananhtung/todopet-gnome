@@ -200,4 +200,19 @@ async function lifeStorage(t) {
     const kept = makeBrain({store});
     await kept.start();
     t.eq(kept.life.state.totalDone, 7, 'the saved pet is loaded at start');
+
+    // Hunger counts down on every 15 s round, but life.json is not written every round; stop() saves the rest.
+    const quiet = new MemoryStore();
+    const q = makeBrain({store: quiet, active: [task('a', '2026-10-27')]});
+    await q.start(); await q.refresh(); await q.settle();
+    const lifeSaves = () => quiet.saves.filter(([name]) => name === 'life');
+    const before = lifeSaves().length;
+    for (let s = 1; s <= 120; s++)
+        q.tick(later(at('2026-10-27T11:00'), s * SECOND));
+    await q.settle();
+    const decayedAt = q.life.state.lastDecayAt;
+    t.check(lifeSaves().length - before <= 1 && decayedAt > at('2026-10-27T11:01:30').getTime(),
+        `two minutes of 15 s rounds write life.json at most once (${lifeSaves().length - before})`);
+    q.stop();
+    t.eq(lifeSaves().at(-1)?.[1].lastDecayAt, decayedAt, 'stop() saves the hunger kept in memory');
 }

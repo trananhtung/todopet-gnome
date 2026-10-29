@@ -1,7 +1,7 @@
 import {getLang, setLang} from '../extension/core/l10n.js';
 import {atHour, parseDate} from '../extension/core/dates.js';
 import {
-    ACCESSORIES, CELEBRATION_KINDS, LifeRules, PetLife, STAGE_THRESHOLDS, Stage,
+    ACCESSORIES, CELEBRATION_KINDS, LAZY_SAVE_MS, LifeRules, PetLife, STAGE_THRESHOLDS, Stage,
     accessoryEarned, accessoryEmoji, accessoryName, accessoryRequirement, accessorySlot,
     defaultLifeState, distractionTotal, isHungry, lifeStage, lifeStateFromJSON, stageName,
     stageNextXP, stageOf, stageScale, stageSprouts, wornAccessories,
@@ -545,5 +545,42 @@ export default async function (t) {
         await flush();
         t.check(rejecting.state.xp === 4 && heardAsync.length === 1 && heardAsync[0] === 'async fail',
             'a store that rejects on save is reported and the change stays');
+
+        // Lazy changes (hunger counting down every 15 s) are not written each time: with the next ordinary change,
+        // once LAZY_SAVE_MS have passed since the last save, or on flush().
+        let clock = t0.getTime();
+        const lazyStore = memoryStore();
+        const lazy = new PetLife({store: lazyStore, now: () => new Date(clock)});
+        const tick = () => lazy.mutate(x => LifeRules.decay(x, new Date(clock), true), {lazy: true});
+        tick();
+        t.eq(lazyStore.saves.length, 1, 'the first lazy change is saved');
+        for (let i = 1; i <= 4; i++) {
+            clock += 15_000;
+            tick();
+        }
+        t.check(lazyStore.saves.length === 1 && lazy.state.lastDecayAt === clock,
+            'lazy changes within LAZY_SAVE_MS stay in memory');
+        lazy.mutate(x => {
+            x.xp += 5;
+        });
+        t.check(lazyStore.saves.length === 2 && lazyStore.saves[1][1].lastDecayAt === clock && lazyStore.saves[1][1].xp === 5,
+            'an ordinary change saves at once, with the lazy changes before it');
+        clock += 15_000;
+        tick();
+        t.eq(lazyStore.saves.length, 2, 'the clock starts again at every save');
+        clock += LAZY_SAVE_MS - 15_000;
+        tick();
+        t.check(lazyStore.saves.length === 3 && lazyStore.saves[2][1].lastDecayAt === clock,
+            'a lazy change LAZY_SAVE_MS after the last save is saved');
+        clock += 15_000;
+        tick();
+        lazy.flush();
+        t.check(lazyStore.saves.length === 4 && lazyStore.saves[3][1].lastDecayAt === clock, 'flush() saves a lazy change');
+        lazy.flush();
+        t.eq(lazyStore.saves.length, 4, 'flush() with nothing unsaved saves nothing');
+        clock -= HOUR;
+        tick();
+        t.eq(lazyStore.saves.length, 5, 'a clock that went back saves');
+        t.check(LAZY_SAVE_MS >= 60_000 && LAZY_SAVE_MS <= 15 * MINUTE, 'LAZY_SAVE_MS is minutes, not seconds');
     }
 }

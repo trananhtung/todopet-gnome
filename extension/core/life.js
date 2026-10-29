@@ -374,18 +374,24 @@ export const LifeRules = {
     nextDay: nextDayKey,
 };
 
-// --- PetLife: holds the pet's life and saves it after every change ---
+// --- PetLife: holds the pet's life and saves it after a change ---
 
 const STORE_NAME = 'life';
+// How long a lazy change may stay unsaved (see PetLife.mutate).
+export const LAZY_SAVE_MS = 5 * 60 * 1000;
 
 export class PetLife {
     // `store` is {load(name) -> Promise<object|null>, save(name, obj)}; without one nothing is persisted.
     // `initial` is a state (or part of one) to start from, for demos and tests.
     // `onSaveError(error)` hears about saves that failed; by default they go to the log.
-    constructor({store = null, initial = null, onSaveError = null} = {}) {
+    // `now()` is the clock that times lazy saves.
+    constructor({store = null, initial = null, onSaveError = null, now = () => new Date()} = {}) {
         this._store = store;
         this._onSaveError = onSaveError;
+        this._now = now;
         this._state = lifeStateFromJSON(initial);
+        this._savedAt = null; // when the state last went to the store
+        this._unsaved = false; // a lazy change is only in memory
     }
 
     // The current state. Treat it as read-only: it is a snapshot that mutate() replaces, never edits.
@@ -399,16 +405,30 @@ export class PetLife {
         if (!this._store)
             return;
         this._state = lifeStateFromJSON(await this._store.load(STORE_NAME));
+        // The next change saves, lazy or not: a save before the load may not have reached the file.
+        this._savedAt = null;
+        this._unsaved = false;
     }
 
     // Runs `change` on a copy of the state, keeps the copy, saves it and returns what `change` returned.
-    // When `change` throws the state stays as it was.
-    mutate(change) {
+    // When `change` throws the state stays as it was. A `lazy` change (hunger counting down on every 15 s tick) is
+    // saved with the next ordinary change, or once LAZY_SAVE_MS have passed since the last save, or by flush().
+    mutate(change, {lazy = false} = {}) {
         const next = cloneLifeState(this._state);
         const result = change(next);
         this._state = next;
-        this._save();
+        const sinceSave = this._savedAt === null ? Infinity : this._now().getTime() - this._savedAt;
+        if (lazy && sinceSave >= 0 && sinceSave < LAZY_SAVE_MS)
+            this._unsaved = true;
+        else
+            this._save();
         return result;
+    }
+
+    // Saves a lazy change that is still only in memory.
+    flush() {
+        if (this._unsaved)
+            this._save();
     }
 
     // Wears an unlocked accessory (replacing whatever is in the same slot) or takes it off.
@@ -430,6 +450,8 @@ export class PetLife {
     _save() {
         if (!this._store)
             return;
+        this._unsaved = false;
+        this._savedAt = this._now().getTime();
         try {
             Promise.resolve(this._store.save(STORE_NAME, this._state)).catch(e => this._reportSaveError(e));
         } catch (e) {
