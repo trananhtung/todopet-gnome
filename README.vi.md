@@ -119,7 +119,7 @@ Thêm API key Anthropic trong **Cài đặt › Bị dời mãi** ([lấy key](h
 
 ### Pet nói thành tiếng (tuỳ chọn)
 
-Bật **Pet nói thành tiếng** trong Cài đặt › Chung. Lời thoại được đọc bằng `spd-say` (speech-dispatcher), tiếng Việt hoặc tiếng Anh, chạy trên máy bạn. Mặc định tắt, và công tắc bị khoá kèm gợi ý khi máy chưa có `spd-say`.
+Bật **Pet nói thành tiếng** trong Cài đặt › Chung. Lời thoại được đọc bằng `spd-say` (speech-dispatcher), tiếng Việt hoặc tiếng Anh, chạy trên máy bạn. Mặc định tắt. Khi máy chưa có `spd-say`, công tắc hiện gợi ý và chỉ tắt được, không bật được.
 
 ### Dùng Todoist qua Claude hoặc AI khác (MCP)
 

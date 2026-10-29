@@ -119,7 +119,7 @@ Add an Anthropic API key in **Settings › Postponed** ([get one](https://consol
 
 ### Spoken lines (optional)
 
-Switch on **Pet speaks out loud** in Settings › General. Lines are spoken with `spd-say` (speech-dispatcher) in English or Vietnamese, offline if your voice is. It is off by default, and the switch is disabled with a hint when `spd-say` isn't installed.
+Switch on **Pet speaks out loud** in Settings › General. Lines are spoken with `spd-say` (speech-dispatcher) in English or Vietnamese, offline if your voice is. It is off by default. When `spd-say` isn't installed the switch shows a hint and can only be turned off.
 
 ### Using Todoist from Claude or other AI apps (MCP)
 
